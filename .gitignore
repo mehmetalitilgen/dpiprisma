@@ -1,0 +1,48 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# --- Ortam / bagimliliklar ---
+.venv/
+.env
+# NOT: uv.lock bilerek ignore EDILMIYOR - uygulamalarda commit edilir.
+
+# --- Test / arac onbellekleri ---
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+
+# --- Editor / IDE ---
+.vscode/
+.idea/
+*.swp
+
+# --- Isletim sistemi ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Bu projeye ozel ---
+# Paket yakalamalari: gercek trafik iceriyor (IP, ziyaret edilen alan adlari,
+# cerezler). Kazara commit edilirse git gecmisinden silmek zordur.
+*.pcap
+*.pcapng
+captures/
+
+# TLS anahtarlari ve sertifikalar - asla commit edilmez.
+*.pem
+*.key
+*.crt
+*.p12
+sslkeylog*.txt
+
+# Denemeler / karalama dosyalari
+scratch*.py
+
+# Kisisel notlar
+struct.md
