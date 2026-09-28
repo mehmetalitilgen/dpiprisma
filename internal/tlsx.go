@@ -18,7 +18,3 @@ func X25519Keypair() (priv []byte, pub []byte) {
 	return priv, key.PublicKey().Bytes()
 }
 
-
-func buildClientHello() []byte {
-	
-}

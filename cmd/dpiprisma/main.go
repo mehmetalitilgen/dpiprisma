@@ -1,16 +1,11 @@
 package main
 
-import (
-	"fmt"
+import "fmt"
 
-	tlsx "github.com/mehmetalitilgen/dpiprisma/internal"
-)
+var version = "dev"
 
 func main() {
 
-	_ , pub := tlsx.X25519Keypair()
-	fmt.Println(pub)
-
-	
+	fmt.Printf("dpiprisma %v\n", version)
 
 }
