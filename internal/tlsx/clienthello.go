@@ -3,6 +3,7 @@ package tlsx
 import (
 	"crypto/ecdh"
 	"crypto/rand"
+	"errors"
 	"fmt"
 )
 
@@ -118,4 +119,137 @@ func appendVec16(b []byte, v []byte) ([]byte, bool) {
 	}
 	b = appendU16(b, uint16(len(v)))
 	return append(b, v...), true
+}
+
+// Errors returned by ParseSNI. Callers should check them with errors.Is.
+var (
+	ErrNotHandshake   = errors.New("tlsx: not a handshake record")
+	ErrNotClientHello = errors.New("tlsx: not a client hello")
+	ErrTruncated      = errors.New("tlsx: truncated record")
+	ErrNoSNI          = errors.New("tlsx: no server_name extension")
+)
+
+const (
+	recordTypeHandshake      = 0x16
+	handshakeTypeClientHello = 0x01
+	extensionServerName      = 0x0000
+	serverNameTypeHostName   = 0x00
+)
+
+// ParseSNI returns the host name from the server_name extension of the
+// ClientHello carried in record. The whole ClientHello must fit in this
+// single TLS record.
+func ParseSNI(record []byte) (string, error) {
+	r := reader{buf: record}
+
+	contentType, ok := r.u8()
+	if !ok {
+		return "", ErrTruncated
+	}
+	if contentType != recordTypeHandshake {
+		return "", ErrNotHandshake
+	}
+
+	if _, ok := r.u16(); !ok { // legacy_record_version
+		return "", ErrTruncated
+	}
+
+	fragment, ok := r.vec16()
+	if !ok {
+		return "", ErrTruncated
+	}
+
+	hs := reader{buf: fragment}
+
+	msgType, ok := hs.u8()
+	if !ok {
+		return "", ErrTruncated
+	}
+	if msgType != handshakeTypeClientHello {
+		return "", ErrNotClientHello
+	}
+
+	bodyLen, ok := hs.u24()
+	if !ok {
+		return "", ErrTruncated
+	}
+
+	body, ok := hs.bytes(int(bodyLen))
+	if !ok {
+		return "", ErrTruncated
+	}
+
+	return parseClientHello(body)
+}
+
+func parseClientHello(body []byte) (string, error) {
+	ch := reader{buf: body}
+
+	if _, ok := ch.u16(); !ok { // legacy_version
+		return "", ErrTruncated
+	}
+	if _, ok := ch.bytes(32); !ok { // random
+		return "", ErrTruncated
+	}
+	if _, ok := ch.vec8(); !ok { // session_id
+		return "", ErrTruncated
+	}
+	if _, ok := ch.vec16(); !ok { // cipher_suites
+		return "", ErrTruncated
+	}
+	if _, ok := ch.vec8(); !ok { // compression_methods
+		return "", ErrTruncated
+	}
+
+	if len(ch.buf)-ch.pos == 0 {
+		return "", ErrNoSNI // the extensions block is optional before TLS 1.3
+	}
+
+	exts, ok := ch.vec16()
+	if !ok {
+		return "", ErrTruncated
+	}
+
+	ex := reader{buf: exts}
+	for len(ex.buf)-ex.pos > 0 {
+		extType, ok := ex.u16()
+		if !ok {
+			return "", ErrTruncated
+		}
+		extData, ok := ex.vec16()
+		if !ok {
+			return "", ErrTruncated
+		}
+		if extType == extensionServerName {
+			return parseServerName(extData)
+		}
+	}
+
+	return "", ErrNoSNI
+}
+
+func parseServerName(data []byte) (string, error) {
+	sni := reader{buf: data}
+
+	list, ok := sni.vec16()
+	if !ok {
+		return "", ErrTruncated
+	}
+
+	names := reader{buf: list}
+	for len(names.buf)-names.pos > 0 {
+		nameType, ok := names.u8()
+		if !ok {
+			return "", ErrTruncated
+		}
+		name, ok := names.vec16()
+		if !ok {
+			return "", ErrTruncated
+		}
+		if nameType == serverNameTypeHostName && len(name) > 0 {
+			return string(name), nil
+		}
+	}
+
+	return "", ErrNoSNI
 }
