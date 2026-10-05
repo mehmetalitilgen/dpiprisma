@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -503,6 +504,15 @@ func checkAcceptedByServer(t *testing.T, hello []byte) {
 	if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
 		t.Fatal(err)
 	}
+
+	expectServerHello(t, conn, hello)
+}
+
+// expectServerHello writes hello to conn and fails the test unless the
+// peer answers with a real ServerHello.
+func expectServerHello(t *testing.T, conn net.Conn, hello []byte) {
+	t.Helper()
+
 	if _, err := conn.Write(hello); err != nil {
 		t.Fatalf("write ClientHello: %v", err)
 	}
@@ -566,6 +576,36 @@ func TestBuildClientHelloErrors(t *testing.T) {
 				t.Errorf("ParseSNI() = (%q, %v); want (%q, nil)", got, err, tt.opts.SNI)
 			}
 			checkAcceptedByServer(t, hello)
+		})
+	}
+}
+
+// TestIntegrationServerHello sends a built ClientHello to real servers on
+// the internet. It only runs when DPIPRISMA_INTEGRATION is set.
+func TestIntegrationServerHello(t *testing.T) {
+	if os.Getenv("DPIPRISMA_INTEGRATION") == "" {
+		t.Skip("set DPIPRISMA_INTEGRATION=1 to run tests that need the internet")
+	}
+
+	hosts := []string{"example.com", "cloudflare.com", "github.com"}
+	for _, host := range hosts {
+		t.Run(host, func(t *testing.T) {
+			hello, err := BuildClientHello(HelloOptions{SNI: host})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			dialer := net.Dialer{Timeout: 5 * time.Second} // connection setup
+			conn, err := dialer.Dial("tcp", net.JoinHostPort(host, "443"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.Close()
+			if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil { // reads and writes
+				t.Fatal(err)
+			}
+
+			expectServerHello(t, conn, hello)
 		})
 	}
 }
