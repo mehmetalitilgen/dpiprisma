@@ -1,5 +1,7 @@
 # dpiprisma
 
+[![CI](https://github.com/mehmetalitilgen/dpiprisma/actions/workflows/ci.yml/badge.svg)](https://github.com/mehmetalitilgen/dpiprisma/actions/workflows/ci.yml)
+
 Give it a domain and dpiprisma tells you **how** it is blocked on your network,
 **where** the DPI device sits, and **which** circumvention parameters actually
 work — in a readable report.
