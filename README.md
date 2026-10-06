@@ -49,3 +49,8 @@ dpiprisma is a network measurement and research tool.
 - You are solely responsible for complying with the laws of your jurisdiction.
   The authors accept no liability for misuse of this software or for any
   consequences of its use.
+
+  
+## License
+
+[MIT](LICENSE) © 2026 Mehmet Ali Tilgen
