@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"log/slog"
 	"strings"
 	"testing"
 )
@@ -47,5 +48,47 @@ func TestRootCmd(t *testing.T) {
 				t.Errorf("output = %q; want it to contain %q", got, tt.contains)
 			}
 		})
+	}
+}
+
+func TestNewLogger(t *testing.T) {
+	var quiet bytes.Buffer
+	l := newLogger(&quiet, false)
+	l.Debug("debug message")
+	l.Warn("warn message")
+	if strings.Contains(quiet.String(), "debug message") {
+		t.Errorf("quiet logger printed a debug message: %q", quiet.String())
+	}
+	if !strings.Contains(quiet.String(), "warn message") {
+		t.Errorf("quiet logger hid a warning: %q", quiet.String())
+	}
+
+	var loud bytes.Buffer
+	l = newLogger(&loud, true)
+	l.Debug("debug message")
+	if !strings.Contains(loud.String(), "debug message") {
+		t.Errorf("verbose logger hid a debug message: %q", loud.String())
+	}
+}
+
+func TestVerboseFlag(t *testing.T) {
+	// The command replaces the global logger; put the old one back afterwards.
+	old := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(old) })
+
+	out, err := run(t, "-v", "version")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "msg=starting") {
+		t.Errorf("-v output = %q; want a debug line", out)
+	}
+
+	out, err = run(t, "version")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "msg=starting") {
+		t.Errorf("output without -v = %q; want no debug line", out)
 	}
 }
