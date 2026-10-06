@@ -1,0 +1,88 @@
+package model
+
+import (
+	"encoding/json"
+	"testing"
+	"time"
+)
+
+func TestVerdictString(t *testing.T) {
+	tests := []struct {
+		v    Verdict
+		want string
+	}{
+		{VerdictUnknown, "unknown"},
+		{VerdictSNIBlocking, "sni_blocking"},
+		{Verdict(99), "Verdict(99)"},
+		{VerdictAccessible, "accessible"},
+		{VerdictDNSPoisoning, "dns_poisoning"},
+		{VerdictIPBlackhole, "ip_blackhole"},
+		{Verdict(-1), "Verdict(-1)"},
+	}
+	for _, tt := range tests {
+		if got := tt.v.String(); got != tt.want {
+			t.Errorf("Verdict(%d).String() = %q; want %q", int(tt.v), got, tt.want)
+		}
+	}
+}
+
+func TestVerdictTextRoundTrip(t *testing.T) {
+	all := []Verdict{VerdictUnknown, VerdictAccessible, VerdictDNSPoisoning, VerdictIPBlackhole, VerdictSNIBlocking}
+	for _, v := range all {
+		text, err := v.MarshalText()
+		if err != nil {
+			t.Fatalf("%v.MarshalText() error = %v", v, err)
+		}
+
+		var back Verdict
+		if err := back.UnmarshalText(text); err != nil {
+			t.Fatalf("UnmarshalText(%q) error = %v", text, err)
+		}
+		if back != v {
+			t.Errorf("round trip of %v gave %v", v, back)
+		}
+	}
+}
+
+func TestVerdictTextErrors(t *testing.T) {
+	if _, err := Verdict(99).MarshalText(); err == nil {
+		t.Error("Verdict(99).MarshalText() error = nil; want an error")
+	}
+
+	var v Verdict
+	if err := v.UnmarshalText([]byte("blocked")); err == nil {
+		t.Error(`UnmarshalText("blocked") error = nil; want an error`)
+	}
+}
+
+func TestProbeResultJSON(t *testing.T) {
+	at := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC) // fixed time, so the expected JSON never changes
+
+	tests := []struct {
+		name string
+		r    ProbeResult
+		want string
+	}{
+		{
+			name: "with reason",
+			r:    ProbeResult{Domain: "x.com", Verdict: VerdictSNIBlocking, Reason: "RST after ClientHello", CheckedAt: at},
+			want: `{"domain":"x.com","verdict":"sni_blocking","reason":"RST after ClientHello","checked_at":"2026-10-06T12:00:00Z"}`,
+		},
+		{
+			name: "without reason",
+			r:    ProbeResult{Domain: "example.org", Verdict: VerdictAccessible, CheckedAt: at},
+			want: `{"domain":"example.org","verdict":"accessible","checked_at":"2026-10-06T12:00:00Z"}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := json.Marshal(tt.r)
+			if err != nil {
+				t.Fatalf("json.Marshal error = %v", err)
+			}
+			if string(got) != tt.want {
+				t.Errorf("json.Marshal = %s\nwant           %s", got, tt.want)
+			}
+		})
+	}
+}
