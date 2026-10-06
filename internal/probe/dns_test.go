@@ -104,3 +104,77 @@ func TestIntegrationDoHCloudflare(t *testing.T) {
 	}
 	t.Logf("example.com -> %v", got)
 }
+
+// fakeResolver answers from a fixed map; a missing host gives err (or
+// ErrNXDomain when err is nil).
+type fakeResolver struct {
+	answers map[string][]string
+	err     error
+}
+
+func (f fakeResolver) LookupA(ctx context.Context, host string) ([]netip.Addr, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	ips, ok := f.answers[host]
+	if !ok {
+		return nil, ErrNXDomain
+	}
+	var addrs []netip.Addr
+	for _, ip := range ips {
+		addrs = append(addrs, netip.MustParseAddr(ip))
+	}
+	return addrs, nil
+}
+
+func TestCompareDNS(t *testing.T) {
+	trusted := fakeResolver{answers: map[string][]string{"x.com": {"1.1.1.1", "2.2.2.2"}}}
+	broken := errors.New("network down")
+
+	tests := []struct {
+		name         string
+		system       Resolver
+		trusted      Resolver
+		wantMismatch bool
+		wantBogus    bool
+		wantErr      bool
+	}{
+		{"same answer", fakeResolver{answers: map[string][]string{"x.com": {"2.2.2.2"}}}, trusted, false, false, false},
+		{"different public answer", fakeResolver{answers: map[string][]string{"x.com": {"9.9.9.9"}}}, trusted, true, false, false},
+		{"loopback answer", fakeResolver{answers: map[string][]string{"x.com": {"127.0.0.1"}}}, trusted, true, true, false},
+		{"private answer", fakeResolver{answers: map[string][]string{"x.com": {"10.0.0.1"}}}, trusted, true, true, false},
+		{"unspecified answer", fakeResolver{answers: map[string][]string{"x.com": {"0.0.0.0"}}}, trusted, true, true, false},
+		{"system says NXDOMAIN", fakeResolver{answers: map[string][]string{}}, trusted, true, false, false},
+		{"system fails", fakeResolver{err: broken}, trusted, false, false, true},
+		{"trusted fails", fakeResolver{answers: map[string][]string{"x.com": {"2.2.2.2"}}}, fakeResolver{err: broken}, false, false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := CompareDNS(context.Background(), tt.system, tt.trusted, "x.com")
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("CompareDNS error = %v; wantErr %v", err, tt.wantErr)
+			}
+			if err != nil {
+				return
+			}
+			if got.Mismatch != tt.wantMismatch || got.Bogus != tt.wantBogus {
+				t.Errorf("CompareDNS = %+v; want Mismatch=%v Bogus=%v", got, tt.wantMismatch, tt.wantBogus)
+			}
+		})
+	}
+}
+
+func TestIntegrationSystemResolver(t *testing.T) {
+	if os.Getenv("DPIPRISMA_INTEGRATION") == "" {
+		t.Skip("set DPIPRISMA_INTEGRATION=1 to run tests that need the internet")
+	}
+	var r SystemResolver
+
+	got, err := r.LookupA(context.Background(), "example.com")
+	if err != nil || len(got) == 0 {
+		t.Errorf("LookupA(example.com) = (%v, %v); want at least one address", got, err)
+	}
+	if _, err := r.LookupA(context.Background(), "nope.invalid"); !errors.Is(err, ErrNXDomain) {
+		t.Errorf("LookupA(nope.invalid) error = %v; want ErrNXDomain", err)
+	}
+}

@@ -1,3 +1,4 @@
+// Package probe runs the network measurements behind dpiprisma's verdicts.
 package probe
 
 import (
@@ -6,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/netip"
+	"slices"
 
 	"github.com/miekg/dns"
 )
@@ -20,11 +23,14 @@ type Resolver interface {
 	LookupA(ctx context.Context, host string) ([]netip.Addr, error)
 }
 
+// DoHResolver resolves names with DNS over HTTPS (RFC 8484).
 type DoHResolver struct {
-	URL    string
-	Client *http.Client
+	URL    string       // DoH endpoint, e.g. "https://cloudflare-dns.com/dns-query"
+	Client *http.Client // HTTP client used for the queries
 }
 
+// SystemResolver resolves names with the operating system's DNS settings,
+// which the ISP usually controls.
 type SystemResolver struct{}
 
 // LookupA returns the A records of host, asked through the DoH server.
@@ -87,4 +93,61 @@ func (r *DoHResolver) LookupA(ctx context.Context, host string) ([]netip.Addr, e
 
 	return addrs, nil
 
+}
+
+// LookupA returns the A records of host from the system resolver.
+func (s *SystemResolver) LookupA(ctx context.Context, host string) ([]netip.Addr, error) {
+	addrs, err := net.DefaultResolver.LookupNetIP(ctx, "ip4", host)
+	if err != nil {
+		var dnsErr *net.DNSError
+		if errors.As(err, &dnsErr) && dnsErr.IsNotFound {
+			return nil, ErrNXDomain
+		}
+		return nil, fmt.Errorf("probe: system lookup %s: %w", host, err)
+	}
+	return addrs, nil
+}
+
+// DNSComparison is the result of asking the system resolver and a trusted
+// resolver for the same host.
+type DNSComparison struct {
+	System   []netip.Addr // the system resolver's answer; empty if it said NXDOMAIN
+	Trusted  []netip.Addr // the trusted (DoH) resolver's answer
+	Mismatch bool         // the two answers share no address
+	Bogus    bool         // the system answered with a private, loopback or unspecified address
+}
+
+// CompareDNS looks up host with both resolvers and reports whether the
+// system answer looks tampered with. A system NXDOMAIN is a finding, not an
+// error; any other failure of either resolver is returned.
+func CompareDNS(ctx context.Context, system, trusted Resolver, host string) (DNSComparison, error) {
+	var dc DNSComparison
+
+	trustedAddrs, err := trusted.LookupA(ctx, host)
+	if err != nil {
+		return dc, err
+	}
+	dc.Trusted = trustedAddrs
+
+	systemAddrs, err := system.LookupA(ctx, host)
+	if err != nil && !errors.Is(err, ErrNXDomain) {
+		return dc, err
+	}
+	dc.System = systemAddrs
+
+	dc.Mismatch = true
+	for _, addr := range dc.System {
+		if slices.Contains(dc.Trusted, addr) {
+			dc.Mismatch = false
+			break
+		}
+	}
+
+	for _, addr := range dc.System {
+		if addr.IsPrivate() || addr.IsLoopback() || addr.IsUnspecified() {
+			dc.Bogus = true
+		}
+	}
+
+	return dc, nil
 }
