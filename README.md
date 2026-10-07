@@ -6,12 +6,12 @@ Give it a domain and dpiprisma tells you **how** it is blocked on your network,
 **where** the DPI device sits, and **which** circumvention parameters actually
 work — in a readable report.
 
-> **Status: early development.** The features below describe the goal of the
-> project; most of them are not implemented yet.
+> **Status: v0.1.0.** Diagnosis (`dpiprisma scan`) works. Locating the DPI
+> device, forged-reset detection, strategy testing and reports are planned.
 
 ## What it does
 
-- **Diagnose** — tells DNS poisoning, IP-level blackholing and SNI-based
+- **Diagnose** *(available)* — tells DNS poisoning, IP-level blackholing and SNI-based
   blocking apart using controlled A/B tests: same IP, same port, only the SNI
   changes.
 - **Locate** — finds how many hops away the DPI device is by sending TLS
@@ -32,8 +32,30 @@ Requires Go 1.25 or newer.
 
 ```sh
 go build ./cmd/dpiprisma
-./dpiprisma
 ```
+
+## Usage
+
+```console
+$ dpiprisma scan example.com github.com
+DOMAIN       VERDICT     REASON
+example.com  accessible  TLS handshake succeeded
+github.com   accessible  TLS handshake succeeded
+```
+
+For each domain, `scan` compares the system DNS answer with DNS over HTTPS,
+opens a TCP connection to the real address and sends two TLS ClientHellos to
+it — one with a harmless control name, one with the domain — then reports one
+of `accessible`, `dns_poisoning`, `ip_blackhole`, `sni_blocking` or
+`unknown`, with the reason.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--json` | off | Print JSON instead of a table |
+| `--timeout` | `5s` | Time limit for each network step |
+| `--parallel` | `4` | Domains scanned at the same time |
+| `--doh` | Cloudflare | Trusted DNS-over-HTTPS endpoint |
+| `-v` | off | Print debug logs for every step (to stderr) |
 
 Later features need raw packet access: Npcap on Windows or libpcap on
 Linux/macOS, plus administrator/root privileges.
