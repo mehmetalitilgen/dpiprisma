@@ -86,3 +86,46 @@ func TestProbeResultJSON(t *testing.T) {
 		})
 	}
 }
+
+func TestClassify(t *testing.T) {
+	// reachable is the evidence for a site that works end to end.
+	reachable := Evidence{TCPConnected: true, TLSControlAnswered: true, TLSTargetAnswered: true}
+
+	tests := []struct {
+		name       string
+		e          Evidence
+		want       Verdict
+		wantReason string
+	}{
+		{"accessible", reachable, VerdictAccessible, "TLS handshake succeeded"},
+		{"accessible with DNS mismatch",
+			Evidence{DNSMismatch: true, TCPConnected: true, TLSControlAnswered: true, TLSTargetAnswered: true},
+			VerdictAccessible, "TLS handshake succeeded; DNS answers differ (CDN?)"},
+		{"bogus DNS wins over a working site",
+			Evidence{DNSBogus: true, TCPConnected: true, TLSControlAnswered: true, TLSTargetAnswered: true},
+			VerdictDNSPoisoning, "system DNS returned a bogus address"},
+		{"NXDOMAIN", Evidence{DNSNXDomain: true, TCPConnected: true, TLSTargetAnswered: true},
+			VerdictDNSPoisoning, "system DNS says the domain does not exist"},
+		{"bogus is checked before NXDOMAIN", Evidence{DNSBogus: true, DNSNXDomain: true},
+			VerdictDNSPoisoning, "system DNS returned a bogus address"},
+		{"TCP timeout", Evidence{TCPTimeout: true}, VerdictIPBlackhole, "TCP connection to the real address timed out"},
+		{"TCP refused", Evidence{}, VerdictUnknown, "TCP connection to the real address failed"},
+		{"TCP failure wins over TLS", Evidence{TCPTimeout: true, TLSControlAnswered: true}, VerdictIPBlackhole,
+			"TCP connection to the real address timed out"},
+		{"SNI blocking", Evidence{TCPConnected: true, TLSControlAnswered: true}, VerdictSNIBlocking,
+			"the server answers other names but not this one"},
+		{"SNI blocking despite DNS mismatch", Evidence{DNSMismatch: true, TCPConnected: true, TLSControlAnswered: true},
+			VerdictSNIBlocking, "the server answers other names but not this one"},
+		{"target answered without control", Evidence{TCPConnected: true, TLSTargetAnswered: true},
+			VerdictAccessible, "TLS handshake succeeded"},
+		{"no TLS answer at all", Evidence{TCPConnected: true}, VerdictUnknown, "no TLS answer for either name"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, reason := Classify(tt.e)
+			if got != tt.want || reason != tt.wantReason {
+				t.Errorf("Classify(%+v) = (%v, %q); want (%v, %q)", tt.e, got, reason, tt.want, tt.wantReason)
+			}
+		})
+	}
+}
