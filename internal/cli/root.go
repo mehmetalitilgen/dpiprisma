@@ -34,6 +34,7 @@ func newRootCmd(version string) *cobra.Command {
 	root.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "print debug logs")
 	root.SetVersionTemplate("dpiprisma {{.Version}}\n")
 	root.AddCommand(newVersionCmd(version))
+	root.AddCommand(newScanCmd())
 	return root
 }
 
