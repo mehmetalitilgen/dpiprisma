@@ -6,13 +6,15 @@ import (
 	"encoding/binary"
 	"errors"
 	"net/netip"
+	"time"
 )
 
 // Errors returned by the parsers.
 var (
-	ErrTruncated = errors.New("packet: truncated packet")
-	ErrNotIPv4   = errors.New("packet: not an IPv4 packet")
-	ErrBadHeader = errors.New("packet: invalid header length")
+	ErrTruncated       = errors.New("packet: truncated packet")
+	ErrNotIPv4         = errors.New("packet: not an IPv4 packet")
+	ErrBadHeader       = errors.New("packet: invalid header length")
+	ErrNotTimeExceeded = errors.New("packet: not an ICMP time exceeded message")
 )
 
 // IPv4Header holds the IPv4 header fields dpiprisma inspects.
@@ -119,4 +121,89 @@ func ParseTCP(b []byte) (TCPHeader, error) {
 	h.Window = binary.BigEndian.Uint16(b[14:16])
 
 	return h, nil
+}
+
+// TCPChecksum returns the TCP checksum of tcp (header plus data, with the
+// checksum field zeroed) sent from src to dst. It covers the 12-byte IPv4
+// pseudo-header, which is not part of the packet itself.
+func TCPChecksum(src, dst netip.Addr, tcp []byte) uint16 {
+	buf := make([]byte, 12, 12+len(tcp))
+
+	s, d := src.As4(), dst.As4()
+	copy(buf[0:4], s[:])
+	copy(buf[4:8], d[:])
+	buf[8] = 0
+	buf[9] = 6 // protocol: TCP
+	binary.BigEndian.PutUint16(buf[10:12], uint16(len(tcp)))
+
+	buf = append(buf, tcp...)
+	return Checksum(buf)
+}
+
+// MarshalSYN returns a 20-byte TCP SYN header without options, from src to
+// dst, with sequence number seq and a valid checksum.
+func MarshalSYN(src, dst netip.AddrPort, seq uint32) []byte {
+	buf := make([]byte, 20)
+
+	binary.BigEndian.PutUint16(buf[0:2], src.Port())
+	binary.BigEndian.PutUint16(buf[2:4], dst.Port())
+	binary.BigEndian.PutUint32(buf[4:8], seq)
+	// bytes 8-11: ack stays zero in a SYN
+	buf[12] = 5 << 4 // header length: 5 words = 20 bytes
+	buf[13] = FlagSYN
+	binary.BigEndian.PutUint16(buf[14:16], 64240) // a common Linux window, so we do not stand out
+
+	cs := TCPChecksum(src.Addr(), dst.Addr(), buf)
+	binary.BigEndian.PutUint16(buf[16:18], cs)
+	// bytes 18-19: urgent pointer stays zero
+
+	return buf
+}
+
+// TimeExceeded is an ICMP time exceeded message: a router dropped one of our
+// packets because its TTL ran out.
+type TimeExceeded struct {
+	Router      netip.Addr // the hop that dropped the packet; set by the caller
+	OrigSrc     netip.Addr // source of the dropped packet
+	OrigDst     netip.Addr // destination of the dropped packet
+	OrigSrcPort uint16
+	OrigDstPort uint16
+	OrigSeq     uint32
+	At          time.Time // when the message arrived; set by the caller
+}
+
+// ParseTimeExceeded parses the ICMP message b (the payload of the outer IPv4
+// packet). The quoted packet holds only its IPv4 header and the first 8 bytes
+// of TCP, so it is read at fixed offsets instead of with ParseIPv4/ParseTCP.
+func ParseTimeExceeded(b []byte) (TimeExceeded, error) {
+	var t TimeExceeded
+
+	if len(b) < 8+20+8 {
+		return t, ErrTruncated
+	}
+	if b[0] != 11 {
+		return t, ErrNotTimeExceeded
+	}
+
+	// The quoted IPv4 header starts after the 8-byte ICMP header.
+	if b[8]>>4 != 4 {
+		return t, ErrNotIPv4
+	}
+	hLen := int(b[8]&0x0f) * 4
+	if hLen < 20 {
+		return t, ErrBadHeader
+	}
+	t.OrigSrc = netip.AddrFrom4([4]byte(b[8+12 : 8+16]))
+	t.OrigDst = netip.AddrFrom4([4]byte(b[8+16 : 8+20]))
+
+	tcpStart := 8 + hLen
+	if len(b) < tcpStart+8 {
+		return TimeExceeded{}, ErrTruncated
+	}
+	tcp := b[tcpStart:]
+	t.OrigSrcPort = binary.BigEndian.Uint16(tcp[0:2])
+	t.OrigDstPort = binary.BigEndian.Uint16(tcp[2:4])
+	t.OrigSeq = binary.BigEndian.Uint32(tcp[4:8])
+
+	return t, nil
 }
