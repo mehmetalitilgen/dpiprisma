@@ -37,9 +37,15 @@ func CaptureTCP(ctx context.Context, peer netip.Addr, handle func(Captured)) err
 		return fmt.Errorf("packet: wrap raw socket: %w", err)
 	}
 
+	done := make(chan struct{})
+	defer close(done)
+
 	go func() {
-		<-ctx.Done()
-		rawConn.Close()
+		select {
+		case <-ctx.Done():
+			rawConn.Close()
+		case <-done:
+		}
 	}()
 
 	buf := make([]byte, 65535)

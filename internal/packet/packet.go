@@ -163,13 +163,14 @@ func MarshalSYN(src, dst netip.AddrPort, seq uint32) []byte {
 // TimeExceeded is an ICMP time exceeded message: a router dropped one of our
 // packets because its TTL ran out.
 type TimeExceeded struct {
-	Router      netip.Addr // the hop that dropped the packet; set by the caller
-	OrigSrc     netip.Addr // source of the dropped packet
-	OrigDst     netip.Addr // destination of the dropped packet
-	OrigSrcPort uint16
-	OrigDstPort uint16
-	OrigSeq     uint32
-	At          time.Time // when the message arrived; set by the caller
+	Router       netip.Addr // the hop that dropped the packet; set by the caller
+	OrigSrc      netip.Addr // source of the dropped packet
+	OrigDst      netip.Addr // destination of the dropped packet
+	OrigProtocol uint8      // protocol of the dropped packet; 6 for TCP
+	OrigSrcPort  uint16
+	OrigDstPort  uint16
+	OrigSeq      uint32
+	At           time.Time // when the message arrived; set by the caller
 }
 
 // ParseTimeExceeded parses the ICMP message b (the payload of the outer IPv4
@@ -195,6 +196,8 @@ func ParseTimeExceeded(b []byte) (TimeExceeded, error) {
 	}
 	t.OrigSrc = netip.AddrFrom4([4]byte(b[8+12 : 8+16]))
 	t.OrigDst = netip.AddrFrom4([4]byte(b[8+16 : 8+20]))
+
+	t.OrigProtocol = b[8+9]
 
 	tcpStart := 8 + hLen
 	if len(b) < tcpStart+8 {

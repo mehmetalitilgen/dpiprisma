@@ -177,10 +177,24 @@ func TestParseTimeExceeded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := TimeExceeded{OrigSrc: synSrc.Addr(), OrigDst: synDst.Addr(),
+	want := TimeExceeded{OrigSrc: synSrc.Addr(), OrigDst: synDst.Addr(), OrigProtocol: 6,
 		OrigSrcPort: 50000, OrigDstPort: 443, OrigSeq: 1}
 	if te != want {
 		t.Errorf("ParseTimeExceeded = %+v; want %+v", te, want)
+	}
+}
+
+// A time exceeded message for someone else's UDP packet is still a valid
+// message; the caller tells it apart by OrigProtocol.
+func TestParseTimeExceededUDP(t *testing.T) {
+	b := mustHex(t, timeExceeded)
+	b[8+9] = 17 // UDP
+	te, err := ParseTimeExceeded(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if te.OrigProtocol != 17 {
+		t.Errorf("OrigProtocol = %d; want 17", te.OrigProtocol)
 	}
 }
 
