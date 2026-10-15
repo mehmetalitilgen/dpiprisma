@@ -3,12 +3,18 @@ package locate
 import (
 	"context"
 	"errors"
+	"io"
+	"log"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"os"
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/mehmetalitilgen/dpiprisma/internal/probe"
 )
 
 // fakeProber answers from a table instead of the network: hops[ttl] is the
@@ -278,5 +284,275 @@ func TestTCPProberClosedPort(t *testing.T) {
 	}
 	if !hop.Reached {
 		t.Errorf("Probe = %+v; want Reached (RST from a closed port)", hop)
+	}
+}
+
+// fakeHelloProber answers from a table instead of the network: results[ttl]
+// is the answer for that TTL; a missing entry is a timeout.
+type fakeHelloProber struct {
+	results map[int]probe.TLSResult
+	calls   []int // TTLs probed, in order
+
+	// onProbe, if set, runs at the start of every ProbeHello call.
+	onProbe func(ttl int)
+}
+
+func (f *fakeHelloProber) ProbeHello(ctx context.Context, ttl int) probe.TLSResult {
+	f.calls = append(f.calls, ttl)
+	if f.onProbe != nil {
+		f.onProbe(ttl)
+	}
+	if r, ok := f.results[ttl]; ok {
+		return r
+	}
+	return probe.TLSResult{Outcome: probe.TLSTimeout}
+}
+
+func outcome(o probe.TLSOutcome) probe.TLSResult { return probe.TLSResult{Outcome: o} }
+
+// outcomes writes the outcomes as "timeout timeout reset", so a failing test
+// shows the whole search at a glance.
+func outcomes(list []probe.TLSOutcome) string {
+	s := ""
+	for i, o := range list {
+		if i > 0 {
+			s += " "
+		}
+		s += o.String()
+	}
+	return s
+}
+
+func TestFindDPI(t *testing.T) {
+	boom := errors.New("boom")
+	tests := []struct {
+		name      string
+		results   map[int]probe.TLSResult
+		opt       FindOptions
+		wantTTL   int
+		want      string
+		wantErr   error
+		wantCalls int
+	}{
+		{
+			name:      "reset at TTL 4",
+			results:   map[int]probe.TLSResult{4: outcome(probe.TLSReset)},
+			wantTTL:   4,
+			want:      "timeout timeout timeout reset",
+			wantCalls: 4,
+		},
+		{
+			name:      "server answers at TTL 3",
+			results:   map[int]probe.TLSResult{3: outcome(probe.TLSServerHello)},
+			want:      "timeout timeout server_hello",
+			wantCalls: 3,
+		},
+		{
+			name:      "server alert stops too",
+			results:   map[int]probe.TLSResult{2: outcome(probe.TLSAlert)},
+			want:      "timeout alert",
+			wantCalls: 2,
+		},
+		{
+			name:      "silent up to MaxTTL",
+			opt:       FindOptions{MaxTTL: 5},
+			want:      "timeout timeout timeout timeout timeout",
+			wantCalls: 5,
+		},
+		{
+			name:      "dial fails",
+			results:   map[int]probe.TLSResult{2: {Outcome: probe.TLSDialFailed, Err: boom}},
+			want:      "timeout dial_failed",
+			wantErr:   boom,
+			wantCalls: 2,
+		},
+		{
+			name:      "reset at TTL 1",
+			results:   map[int]probe.TLSResult{1: outcome(probe.TLSReset)},
+			wantTTL:   1,
+			want:      "reset",
+			wantCalls: 1,
+		},
+		{
+			name: "closed and unknown do not stop",
+			results: map[int]probe.TLSResult{
+				2: outcome(probe.TLSClosed),
+				3: outcome(probe.TLSUnknown),
+				4: outcome(probe.TLSReset),
+			},
+			wantTTL:   4,
+			want:      "timeout closed unknown reset",
+			wantCalls: 4,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &fakeHelloProber{results: tt.results}
+			res, err := FindDPI(context.Background(), f, tt.opt)
+			if tt.wantErr == nil && err != nil {
+				t.Fatalf("FindDPI error = %v", err)
+			}
+			if tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
+				t.Errorf("FindDPI error = %v; want it to wrap %v", err, tt.wantErr)
+			}
+			if res.TTL != tt.wantTTL || res.Found() != (tt.wantTTL > 0) {
+				t.Errorf("TTL = %d, Found = %v; want %d, %v", res.TTL, res.Found(), tt.wantTTL, tt.wantTTL > 0)
+			}
+			if got := outcomes(res.Outcomes); got != tt.want {
+				t.Errorf("Outcomes = %q; want %q", got, tt.want)
+			}
+			if len(f.calls) != tt.wantCalls {
+				t.Errorf("probed TTLs %v; want %d probes", f.calls, tt.wantCalls)
+			}
+		})
+	}
+}
+
+func TestFindDPIMaxTTLDefaultsTo30(t *testing.T) {
+	f := &fakeHelloProber{}
+	res, err := FindDPI(context.Background(), f, FindOptions{})
+	if err != nil || len(res.Outcomes) != 30 || len(f.calls) != 30 {
+		t.Errorf("FindDPI = %d outcomes, %d probes, %v; want 30, 30, nil", len(res.Outcomes), len(f.calls), err)
+	}
+}
+
+func TestFindDPIBadTTL(t *testing.T) {
+	for _, maxTTL := range []int{-1, 256, 300} {
+		f := &fakeHelloProber{}
+		_, err := FindDPI(context.Background(), f, FindOptions{MaxTTL: maxTTL})
+		if !errors.Is(err, ErrBadTTL) || len(f.calls) != 0 {
+			t.Errorf("MaxTTL %d: err = %v, %d probes; want ErrBadTTL, 0", maxTTL, err, len(f.calls))
+		}
+	}
+}
+
+func TestFindDPICancelledBeforeStart(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	f := &fakeHelloProber{}
+	res, err := FindDPI(ctx, f, FindOptions{})
+	if !errors.Is(err, context.Canceled) || len(res.Outcomes) != 0 || len(f.calls) != 0 {
+		t.Errorf("FindDPI = %d outcomes, %v, %d probes; want 0, context.Canceled, 0",
+			len(res.Outcomes), err, len(f.calls))
+	}
+}
+
+func TestFindDPICancelledDuringGap(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	f := &fakeHelloProber{}
+	f.onProbe = func(ttl int) {
+		if ttl == 1 {
+			time.AfterFunc(50*time.Millisecond, cancel) // fires while FindDPI waits for TTL 2
+		}
+	}
+	start := time.Now()
+	res, err := FindDPI(ctx, f, FindOptions{Gap: 10 * time.Second})
+	if time.Since(start) > 5*time.Second {
+		t.Fatal("FindDPI kept sleeping after cancel")
+	}
+	if !errors.Is(err, context.Canceled) || outcomes(res.Outcomes) != "timeout" || len(f.calls) != 1 {
+		t.Errorf("FindDPI = %q, %v, %d probes; want %q, context.Canceled, 1",
+			outcomes(res.Outcomes), err, len(f.calls), "timeout")
+	}
+}
+
+// A probe cut short by Ctrl+C looks like a timeout, but it was never
+// measured: FindDPI must stop without recording it.
+func TestFindDPICancelledDuringProbe(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	f := &fakeHelloProber{}
+	f.onProbe = func(ttl int) {
+		if ttl == 2 {
+			cancel()
+		}
+	}
+	res, err := FindDPI(ctx, f, FindOptions{})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("FindDPI error = %v; want context.Canceled", err)
+	}
+	if got := outcomes(res.Outcomes); got != "timeout" {
+		t.Errorf("Outcomes = %q; want %q (no outcome for the cancelled TTL 2)", got, "timeout")
+	}
+}
+
+func TestTLSHelloProberBadTTL(t *testing.T) {
+	// Nobody listens on port 1: if ProbeHello went to the network, it would
+	// come back as dial_failed instead.
+	p := TLSHelloProber{Dst: netip.MustParseAddrPort("127.0.0.1:1"), SNI: "example.com"}
+	for _, ttl := range []int{-1, 0, 256, 300} {
+		r := p.ProbeHello(context.Background(), ttl)
+		if r.Outcome != probe.TLSUnknown || !errors.Is(r.Err, ErrBadTTL) {
+			t.Errorf("ProbeHello(ttl %d) = %v, %v; want unknown, ErrBadTTL", ttl, r.Outcome, r.Err)
+		}
+	}
+}
+
+// localTLS starts a local TLS server and returns its address.
+func localTLS(t *testing.T) netip.AddrPort {
+	srv := httptest.NewUnstartedServer(http.NotFoundHandler())
+	srv.Config.ErrorLog = log.New(io.Discard, "", 0)
+	srv.StartTLS()
+	t.Cleanup(srv.Close)
+	return netip.MustParseAddrPort(srv.Listener.Addr().String())
+}
+
+// On loopback nothing decrements the TTL, so even TTL 1 reaches the server.
+// The zero Timeout must mean 3 seconds, enough to connect and get an answer.
+func TestTLSHelloProberLoopback(t *testing.T) {
+	p := TLSHelloProber{Dst: localTLS(t), SNI: "example.com"}
+	for _, ttl := range []int{1, 64, 255} {
+		r := p.ProbeHello(context.Background(), ttl)
+		if r.Outcome != probe.TLSServerHello {
+			t.Errorf("ProbeHello(ttl %d) = %v (err %v); want server_hello", ttl, r.Outcome, r.Err)
+		}
+	}
+}
+
+// resetServer resets every connection as soon as the ClientHello arrives,
+// like a DPI box next door.
+func resetServer(t *testing.T) netip.AddrPort {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer c.Close()
+				c.Read(make([]byte, 1024))
+				c.(*net.TCPConn).SetLinger(0) // the deferred Close then sends a RST
+			}()
+		}
+	}()
+	return netip.MustParseAddrPort(ln.Addr().String())
+}
+
+// TestFindDPILoopback runs the real prober end to end, without root.
+func TestFindDPILoopback(t *testing.T) {
+	tests := []struct {
+		name    string
+		dst     netip.AddrPort
+		wantTTL int
+		want    string
+	}{
+		{"server answers", localTLS(t), 0, "server_hello"},
+		{"reset next door", resetServer(t), 1, "reset"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := TLSHelloProber{Dst: tt.dst, SNI: "example.com"}
+			res, err := FindDPI(context.Background(), p, FindOptions{})
+			if err != nil {
+				t.Fatalf("FindDPI error = %v", err)
+			}
+			if res.TTL != tt.wantTTL || outcomes(res.Outcomes) != tt.want {
+				t.Errorf("FindDPI = TTL %d, %q; want TTL %d, %q", res.TTL, outcomes(res.Outcomes), tt.wantTTL, tt.want)
+			}
+		})
 	}
 }

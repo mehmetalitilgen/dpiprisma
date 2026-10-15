@@ -5,10 +5,12 @@ package locate
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/netip"
 	"time"
 
 	"github.com/mehmetalitilgen/dpiprisma/internal/packet"
+	"github.com/mehmetalitilgen/dpiprisma/internal/probe"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -188,4 +190,107 @@ loop:
 		return Hop{}, err
 	}
 	return hop, nil
+}
+
+// DPIResult is the outcome of FindDPI.
+type DPIResult struct {
+	TTL      int                // lowest TTL at which the connection was reset; 0 if none was
+	Outcomes []probe.TLSOutcome // outcome of each probe; Outcomes[0] is TTL 1
+}
+
+// FindOptions controls how FindDPI probes the path.
+type FindOptions struct {
+	MaxTTL int           // highest TTL to try; 0 means 30
+	Gap    time.Duration // pause between probes; 0 means no pause
+}
+
+// Found reports whether a reset was seen at any TTL.
+func (r DPIResult) Found() bool {
+	return r.TTL > 0
+}
+
+// HelloProber sends a ClientHello with the given TTL and reports how the
+// connection ended.
+type HelloProber interface {
+	ProbeHello(ctx context.Context, ttl int) probe.TLSResult
+}
+
+// FindDPI sends ClientHellos with TTL 1, 2, 3, ... and returns the first TTL
+// at which the connection is reset: roughly how many hops away the device
+// that resets it sits. It stops without a result when the server itself
+// answers, and returns an error if the connection cannot be opened. On
+// cancellation it returns the outcomes collected so far with ctx.Err().
+func FindDPI(ctx context.Context, p HelloProber, opt FindOptions) (DPIResult, error) {
+	if opt.MaxTTL < 0 || opt.MaxTTL > 255 {
+		return DPIResult{}, ErrBadTTL
+	}
+
+	if opt.MaxTTL == 0 {
+		opt.MaxTTL = 30
+	}
+
+	var res DPIResult
+
+	for ttl := 1; ttl <= opt.MaxTTL; ttl++ {
+		if ttl > 1 && opt.Gap > 0 {
+			timer := time.NewTimer(opt.Gap)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return res, ctx.Err()
+			case <-timer.C:
+			}
+		}
+		if ctx.Err() != nil {
+			return res, ctx.Err()
+		}
+
+		r := p.ProbeHello(ctx, ttl)
+		// A probe cut short by cancellation looks like a timeout; it was never
+		// measured, so do not record it.
+		if ctx.Err() != nil {
+			return res, ctx.Err()
+		}
+
+		res.Outcomes = append(res.Outcomes, r.Outcome)
+
+		switch r.Outcome {
+		case probe.TLSReset:
+			res.TTL = ttl
+			return res, nil
+		case probe.TLSServerHello, probe.TLSAlert:
+			return res, nil
+		case probe.TLSDialFailed:
+			return res, fmt.Errorf("locate: connect to target: %w", r.Err)
+		}
+	}
+	return res, nil
+}
+
+// TLSHelloProber probes with a real ClientHello for SNI sent to Dst, with the
+// IP TTL lowered after the TCP handshake. It needs no root.
+type TLSHelloProber struct {
+	Dst     netip.AddrPort // target, for example 1.2.3.4:443
+	SNI     string         // server name sent in the ClientHello
+	Timeout time.Duration  // how long one probe may take; 0 means 3s
+}
+
+// ProbeHello opens a connection to p.Dst, lowers its TTL to ttl and sends the
+// ClientHello. A ttl outside 1..255 returns ErrBadTTL without touching the
+// network.
+func (p TLSHelloProber) ProbeHello(ctx context.Context, ttl int) probe.TLSResult {
+	if ttl < 1 || ttl > 255 {
+		return probe.TLSResult{
+			Outcome: probe.TLSUnknown,
+			Err:     fmt.Errorf("locate: TTL %d out of range: %w", ttl, ErrBadTTL),
+		}
+	}
+
+	timeout := p.Timeout
+
+	if timeout == 0 {
+		timeout = 3 * time.Second
+	}
+
+	return probe.ProbeTLSTTL(ctx, p.Dst, p.SNI, timeout, uint8(ttl))
 }

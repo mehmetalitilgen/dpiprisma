@@ -137,6 +137,23 @@ func TestProbeTLS(t *testing.T) {
 	}
 }
 
+// TestProbeTLSTTL checks that setting the TTL does not break the probe. On
+// loopback nothing decrements the TTL, so even TTL 1 reaches the server.
+func TestProbeTLSTTL(t *testing.T) {
+	srv := httptest.NewUnstartedServer(http.NotFoundHandler())
+	srv.Config.ErrorLog = log.New(io.Discard, "", 0)
+	srv.StartTLS()
+	t.Cleanup(srv.Close)
+	addr := netip.MustParseAddrPort(srv.Listener.Addr().String())
+
+	for _, ttl := range []uint8{0, 1, 64, 255} {
+		got := ProbeTLSTTL(context.Background(), addr, "example.com", 2*time.Second, ttl)
+		if got.Outcome != TLSServerHello {
+			t.Errorf("ProbeTLSTTL(ttl %d) = %v (err %v); want server_hello", ttl, got.Outcome, got.Err)
+		}
+	}
+}
+
 func TestProbeTLSEmptySNI(t *testing.T) {
 	got := ProbeTLS(context.Background(), netip.MustParseAddrPort("127.0.0.1:1"), "", time.Second)
 	if got.Outcome != TLSUnknown || !errors.Is(got.Err, tlsx.ErrEmptySNI) {

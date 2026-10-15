@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/mehmetalitilgen/dpiprisma/internal/tlsx"
+	"golang.org/x/net/ipv4"
 )
 
 // TLSOutcome is how a server, or something on the path, answered a ClientHello.
@@ -80,6 +81,13 @@ func classifyReadError(err error) TLSOutcome {
 // ProbeTLS opens a TCP connection to addr, sends a ClientHello for sni and
 // reports what came back within timeout.
 func ProbeTLS(ctx context.Context, addr netip.AddrPort, sni string, timeout time.Duration) TLSResult {
+	return ProbeTLSTTL(ctx, addr, sni, timeout, 0)
+}
+
+// ProbeTLSTTL is ProbeTLS with the IP TTL set to ttl after the TCP handshake,
+// so the ClientHello and every later packet carry it but the handshake does
+// not. A ttl of 0 keeps the system default. It needs no root.
+func ProbeTLSTTL(ctx context.Context, addr netip.AddrPort, sni string, timeout time.Duration, ttl uint8) TLSResult {
 	newCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -94,6 +102,12 @@ func ProbeTLS(ctx context.Context, addr netip.AddrPort, sni string, timeout time
 		return TLSResult{Outcome: TLSDialFailed, Err: err}
 	}
 	defer conn.Close()
+
+	if ttl > 0 {
+		if err := ipv4.NewConn(conn).SetTTL(int(ttl)); err != nil {
+			return TLSResult{Outcome: TLSUnknown, Err: fmt.Errorf("probe: set TTL: %w", err)}
+		}
+	}
 
 	if endTime, ok := newCtx.Deadline(); ok {
 		conn.SetDeadline(endTime)
