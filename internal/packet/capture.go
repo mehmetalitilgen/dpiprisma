@@ -162,6 +162,37 @@ func SendSYN(dst netip.AddrPort, ttl uint8) (netip.AddrPort, error) {
 	return src, nil
 }
 
+// SendRawTCP sends segment (a full TCP header plus any data, as MarshalData or
+// MarshalRST returns) to dst as one raw IPv4 packet with the given TTL. The
+// TCP header's source must match src. It writes a raw socket, so it needs root
+// on Linux, and it does not touch any kernel socket state, so the kernel never
+// retransmits it.
+func SendRawTCP(src, dst netip.AddrPort, ttl uint8, segment []byte) error {
+	conn, err := net.ListenPacket("ip4:tcp", "0.0.0.0")
+	if err != nil {
+		return fmt.Errorf("packet: open raw socket: %w", err)
+	}
+	defer conn.Close()
+
+	rawConn, err := ipv4.NewRawConn(conn)
+	if err != nil {
+		return fmt.Errorf("packet: wrap raw socket: %w", err)
+	}
+
+	h := &ipv4.Header{
+		Version: 4, Len: 20, TotalLen: 20 + len(segment),
+		TTL: int(ttl), Protocol: 6,
+		Src: src.Addr().AsSlice(), Dst: dst.Addr().AsSlice(),
+	}
+
+	if err := rawConn.WriteTo(h, segment, nil); err != nil {
+		return fmt.Errorf("packet: send raw tcp: %w", err)
+	}
+
+	return nil
+
+}
+
 // CaptureTimeExceeded calls handle for every ICMP time exceeded message that
 // arrives, until ctx is cancelled. It does not filter by peer: the message
 // comes from a router on the path, and OrigDstPort/OrigSeq tell which probe

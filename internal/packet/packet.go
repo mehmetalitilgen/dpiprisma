@@ -213,3 +213,28 @@ func ParseTimeExceeded(b []byte) (TimeExceeded, error) {
 
 	return t, nil
 }
+
+// MarshalData returns a TCP segment from src to dst carrying payload, with PSH
+// and ACK set, the given sequence and acknowledgment numbers and a valid
+// checksum. It has no options, so the header is 20 bytes.
+func MarshalData(src, dst netip.AddrPort, seq, ack uint32, payload []byte) []byte {
+	buf := make([]byte, 20)
+
+	binary.BigEndian.PutUint16(buf[0:2], src.Port())
+	binary.BigEndian.PutUint16(buf[2:4], dst.Port())
+	binary.BigEndian.PutUint32(buf[4:8], seq)
+	binary.BigEndian.PutUint32(buf[8:12], ack)
+	buf[12] = 5 << 4 // header length: 5 words = 20 bytes
+	buf[13] = FlagPSH | FlagACK
+	binary.BigEndian.PutUint16(buf[14:16], 64240) // a common Linux window, so we do not stand out
+
+	// bytes 18-19: urgent pointer stays zero
+
+	buf = append(buf, payload...)
+
+	checkSum := TCPChecksum(src.Addr(), dst.Addr(), buf)
+
+	binary.BigEndian.PutUint16(buf[16:18], checkSum)
+
+	return buf
+}
