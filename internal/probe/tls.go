@@ -48,7 +48,24 @@ func (t TLSOutcome) Answered() bool {
 type TLSResult struct {
 	Outcome TLSOutcome    // what came back
 	Elapsed time.Duration // time from sending the ClientHello to the answer or error
+	Connect time.Duration // time the TCP handshake took; about one round trip to the server
 	Err     error         // the error, if any
+}
+
+// EarlyReset reports whether the connection was reset in less than half the
+// handshake time. A reset from the server takes at least one round trip, so
+// one that comes sooner was injected by a device on the path.
+func (r TLSResult) EarlyReset() bool {
+	if r.Outcome != TLSReset {
+		return false
+	}
+	if r.Connect == 0 {
+		return false // the handshake was never timed
+	}
+	if r.Elapsed*2 < r.Connect {
+		return true
+	}
+	return false
 }
 
 // wsaeconnreset is Windows' error code for a reset connection; there,
@@ -97,15 +114,17 @@ func ProbeTLSTTL(ctx context.Context, addr netip.AddrPort, sni string, timeout t
 	}
 
 	dialer := &net.Dialer{}
+	dialStart := time.Now()
 	conn, err := dialer.DialContext(newCtx, "tcp", addr.String())
 	if err != nil {
 		return TLSResult{Outcome: TLSDialFailed, Err: err}
 	}
+	connect := time.Since(dialStart)
 	defer conn.Close()
 
 	if ttl > 0 {
 		if err := ipv4.NewConn(conn).SetTTL(int(ttl)); err != nil {
-			return TLSResult{Outcome: TLSUnknown, Err: fmt.Errorf("probe: set TTL: %w", err)}
+			return TLSResult{Outcome: TLSUnknown, Connect: connect, Err: fmt.Errorf("probe: set TTL: %w", err)}
 		}
 	}
 
@@ -115,22 +134,22 @@ func ProbeTLSTTL(ctx context.Context, addr netip.AddrPort, sni string, timeout t
 
 	start := time.Now()
 	if _, err := conn.Write(clientHello); err != nil {
-		return TLSResult{Outcome: classifyReadError(err), Elapsed: time.Since(start), Err: err}
+		return TLSResult{Outcome: classifyReadError(err), Connect: connect, Elapsed: time.Since(start), Err: err}
 	}
 
 	buf := make([]byte, 6) // record header (5) + handshake type (1)
 	if _, err := io.ReadFull(conn, buf); err != nil {
-		return TLSResult{Outcome: classifyReadError(err), Elapsed: time.Since(start), Err: err}
+		return TLSResult{Outcome: classifyReadError(err), Connect: connect, Elapsed: time.Since(start), Err: err}
 	}
 	elapsed := time.Since(start)
 
 	switch {
 	case buf[0] == 0x16 && buf[5] == 0x02:
-		return TLSResult{Outcome: TLSServerHello, Elapsed: elapsed}
+		return TLSResult{Outcome: TLSServerHello, Connect: connect, Elapsed: elapsed}
 	case buf[0] == 0x15:
-		return TLSResult{Outcome: TLSAlert, Elapsed: elapsed}
+		return TLSResult{Outcome: TLSAlert, Connect: connect, Elapsed: elapsed}
 	default:
-		return TLSResult{Outcome: TLSUnknown, Elapsed: elapsed}
+		return TLSResult{Outcome: TLSUnknown, Connect: connect, Elapsed: elapsed}
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"runtime"
 	"syscall"
 	"testing"
 	"time"
@@ -151,6 +152,52 @@ func TestProbeTLSTTL(t *testing.T) {
 		if got.Outcome != TLSServerHello {
 			t.Errorf("ProbeTLSTTL(ttl %d) = %v (err %v); want server_hello", ttl, got.Outcome, got.Err)
 		}
+	}
+}
+
+func TestTLSResultEarlyReset(t *testing.T) {
+	const us = time.Microsecond
+	tests := []struct {
+		name             string
+		outcome          TLSOutcome
+		elapsed, connect time.Duration
+		want             bool
+	}{
+		{"measured injection", TLSReset, 4400 * us, 53800 * us, true},
+		{"server's own reset", TLSReset, 60 * time.Millisecond, 54 * time.Millisecond, false},
+		{"exactly half", TLSReset, 27 * time.Millisecond, 54 * time.Millisecond, false},
+		{"just under half", TLSReset, 26900 * us, 54 * time.Millisecond, true},
+		{"not a reset", TLSTimeout, 4 * time.Millisecond, 54 * time.Millisecond, false},
+		{"no handshake time", TLSReset, 4 * time.Millisecond, 0, false},
+	}
+	for _, tt := range tests {
+		r := TLSResult{Outcome: tt.outcome, Elapsed: tt.elapsed, Connect: tt.connect}
+		if got := r.EarlyReset(); got != tt.want {
+			t.Errorf("%s: EarlyReset() = %v; want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
+// TestProbeTLSConnect checks that Connect is measured once the handshake is
+// done, and left zero when it never happened. Windows' clock ticks in about
+// half a millisecond, slower than a loopback handshake, so there a measured
+// Connect may read as zero too.
+func TestProbeTLSConnect(t *testing.T) {
+	measured := func(d time.Duration) bool { return d > 0 || runtime.GOOS == "windows" }
+
+	answered := ProbeTLS(context.Background(), sniFilter(t, "blocked.example", ""), "example.com", 2*time.Second)
+	if answered.Outcome != TLSServerHello || !measured(answered.Connect) {
+		t.Errorf("answered: %v, Connect %v; want server_hello, Connect > 0", answered.Outcome, answered.Connect)
+	}
+
+	reset := ProbeTLS(context.Background(), sniFilter(t, "blocked.example", ""), "blocked.example", 2*time.Second)
+	if reset.Outcome != TLSReset || !measured(reset.Connect) {
+		t.Errorf("reset: %v, Connect %v; want reset, Connect > 0", reset.Outcome, reset.Connect)
+	}
+
+	failed := ProbeTLS(context.Background(), netip.MustParseAddrPort("127.0.0.1:1"), "example.com", time.Second)
+	if failed.Outcome != TLSDialFailed || failed.Connect != 0 {
+		t.Errorf("dial failed: %v, Connect %v; want dial_failed, Connect 0", failed.Outcome, failed.Connect)
 	}
 }
 

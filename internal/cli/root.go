@@ -35,6 +35,7 @@ func newRootCmd(version string) *cobra.Command {
 	root.SetVersionTemplate("dpiprisma {{.Version}}\n")
 	root.AddCommand(newVersionCmd(version))
 	root.AddCommand(newScanCmd())
+	root.AddCommand(newLocateCmd())
 	return root
 }
 
