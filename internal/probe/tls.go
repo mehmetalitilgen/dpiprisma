@@ -106,6 +106,19 @@ func ProbeTLS(ctx context.Context, addr netip.AddrPort, sni string, timeout time
 // so the ClientHello and every later packet carry it but the handshake does
 // not. A ttl of 0 keeps the system default. It needs no root.
 func ProbeTLSTTL(ctx context.Context, addr netip.AddrPort, sni string, timeout time.Duration, ttl uint8) TLSResult {
+	return probeWith(ctx, addr, sni, timeout, ttl, func(conn net.Conn, hello []byte) error {
+		_, err := conn.Write(hello)
+		return err
+	})
+}
+
+// probeWith is the shared core of every TLS probe: it opens a TCP connection
+// to addr, sets ttl on it if nonzero, hands the connection and the freshly
+// built ClientHello to send, then reads and classifies the answer within
+// timeout. send does the writing, so the caller decides how the ClientHello
+// leaves the host; everything around it — dialing, timing, TTL, reading and
+// classification — stays the same for every strategy.
+func probeWith(ctx context.Context, addr netip.AddrPort, sni string, timeout time.Duration, ttl uint8, send func(conn net.Conn, hello []byte) error) TLSResult {
 	newCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -140,7 +153,7 @@ func ProbeTLSTTL(ctx context.Context, addr netip.AddrPort, sni string, timeout t
 	}
 
 	start := time.Now()
-	if _, err := conn.Write(clientHello); err != nil {
+	if err := send(conn, clientHello); err != nil {
 		res.Outcome, res.Elapsed, res.Err = classifyReadError(err), time.Since(start), err
 		return res
 	}
@@ -186,4 +199,13 @@ func CompareSNI(ctx context.Context, addr netip.AddrPort, sni string, timeout ti
 		Target:  targetResult,
 		Blocked: controlResult.Outcome.Answered() && !targetResult.Outcome.Answered(),
 	}
+}
+
+// ProbeWith runs the same connect, read and classify flow as ProbeTLS but
+// lets send do the writing, so a strategy can shape how the ClientHello leaves
+// the host (splitting it, reordering segments, sending a decoy first) while
+// the probe still reports what came back. The TTL is left at the system
+// default; a strategy that needs a low TTL sets it on the packets it builds.
+func ProbeWith(ctx context.Context, addr netip.AddrPort, sni string, timeout time.Duration, send func(conn net.Conn, hello []byte) error) TLSResult {
+	return probeWith(ctx, addr, sni, timeout, 0, send)
 }

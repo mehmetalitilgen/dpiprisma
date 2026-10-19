@@ -292,3 +292,55 @@ func TestCompareSNI(t *testing.T) {
 		})
 	}
 }
+
+// probeWithFakeServer answers one connection with a ServerHello-looking record.
+func probeWithFakeServer(t *testing.T) netip.AddrPort {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				io.ReadFull(c, make([]byte, 5)) // read a little of the hello
+				c.Write([]byte{0x16, 0x03, 0x03, 0x00, 0x3a, 0x02})
+			}(c)
+		}
+	}()
+	return netip.MustParseAddrPort(ln.Addr().String())
+}
+
+func TestProbeWith(t *testing.T) {
+	addr := probeWithFakeServer(t)
+
+	// A send that writes the hello normally behaves like ProbeTLS.
+	res := ProbeWith(context.Background(), addr, "example.com", 2*time.Second,
+		func(conn net.Conn, hello []byte) error {
+			_, err := conn.Write(hello)
+			return err
+		})
+	if res.Outcome != TLSServerHello {
+		t.Errorf("Outcome = %v; want server_hello", res.Outcome)
+	}
+}
+
+func TestProbeWithSendError(t *testing.T) {
+	addr := probeWithFakeServer(t)
+	sentinel := errors.New("send failed")
+
+	res := ProbeWith(context.Background(), addr, "example.com", 2*time.Second,
+		func(conn net.Conn, hello []byte) error { return sentinel })
+	if !errors.Is(res.Err, sentinel) {
+		t.Errorf("Err = %v; want the send error", res.Err)
+	}
+	if res.Outcome == TLSServerHello {
+		t.Error("Outcome = server_hello; want a failure when send errors")
+	}
+}
