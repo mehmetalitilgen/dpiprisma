@@ -6,9 +6,10 @@ Give it a domain and dpiprisma tells you **how** it is blocked on your network,
 **where** the DPI device sits, and **which** circumvention parameters actually
 work — in a readable report.
 
-> **Status: v0.1.0.** Diagnosis (`dpiprisma scan`) and locating the DPI
-> device (`dpiprisma locate`) work. Forged-reset detection is implemented as a
-> library and needs root; strategy testing and reports are planned.
+> **Status:** diagnosis (`dpiprisma scan`), locating the DPI device
+> (`dpiprisma locate`) and reports (`dpiprisma report`) work. Forged-reset
+> detection is implemented as a library and needs root; the strategy matrix
+> command is in progress.
 
 ## What it does
 
@@ -25,15 +26,21 @@ work — in a readable report.
   server.
 - **Test strategies** — runs a matrix of evasion techniques (split, disorder,
   fake ClientHello, …) and measures the success rate and latency of each.
-- **Report** — produces a Markdown/HTML report with ready-to-use parameters for
-  tools such as GoodbyeDPI, zapret, byedpi and gecit.
+- **Report** *(available)* — turns saved results into a Markdown or HTML
+  report, with the strategy matrix as a heat map and ready-to-use commands for
+  gecit, zapret, GoodbyeDPI and byedpi.
 
 Those tools are the medicine; dpiprisma is the diagnosis that tells you the
 right dose.
 
-## Build
+## Install
 
-Requires Go 1.25 or newer.
+Download the archive for your system from the
+[releases page](https://github.com/mehmetalitilgen/dpiprisma/releases): Linux,
+Windows and macOS, each for amd64 and arm64. Each archive holds a single
+binary with no dependencies.
+
+To build from source instead (Go 1.25 or newer):
 
 ```sh
 go build ./cmd/dpiprisma
@@ -87,10 +94,43 @@ never the server. `locate` needs no special privileges.
 | `--gap` | `100ms` | Pause between probes |
 | `--control` | `example.com` | Harmless name used to measure the server's distance |
 | `--doh` | Cloudflare | Trusted DNS-over-HTTPS endpoint |
+| `--json` | off | Print JSON for `dpiprisma report` instead of text |
 
 Forged-reset detection and the SYN-based path walk read and write raw
 sockets. They work on Linux with root (or `CAP_NET_RAW`) and do not run on
 Windows; no packet-capture driver is needed.
+
+```console
+$ dpiprisma scan --json blocked.example > scan.json
+$ dpiprisma locate --json blocked.example > locate.json
+$ dpiprisma report --scan scan.json --locate locate.json -o report.html
+```
+
+`report` reads the JSON that `scan`, `locate` and `matrix` write with
+`--json` and writes one report: the diagnosis, the distance to the DPI device,
+the strategy matrix as a heat map of success rates, and for each domain a
+ready-to-use command for gecit, zapret, GoodbyeDPI and byedpi, built from the
+strategy that worked best. A domain the matrix has not tested gets commands
+built from the decoy TTL that `locate` found, marked as untested. The commands
+are starting points; each tool's own documentation covers its setup.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--scan` | – | JSON from `scan --json` (repeatable) |
+| `--locate` | – | JSON from `locate --json` (repeatable) |
+| `--matrix` | – | JSON from `matrix --json` (repeatable) |
+| `-o` | stdout | File to write |
+| `--format` | from `-o` | `md` or `html`; without it, a `.html` output is HTML, anything else Markdown |
+
+## Releasing
+
+Pushing a version tag builds the binaries for every platform with
+[GoReleaser](https://goreleaser.com) and publishes them as a GitHub release:
+
+```sh
+git tag v1.0.0
+git push origin v1.0.0
+```
 
 ## Disclaimer
 

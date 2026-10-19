@@ -1,0 +1,35 @@
+# GoReleaser builds the release binaries; see .github/workflows/release.yml.
+# Check it locally with: goreleaser check && goreleaser build --snapshot --clean
+version: 2
+
+project_name: dpiprisma
+
+builds:
+  - main: ./cmd/dpiprisma
+    env:
+      # Pure Go: no C toolchain needed, and the binaries run without libc
+      # version worries.
+      - CGO_ENABLED=0
+    goos: [linux, windows, darwin]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    # main.version is what "dpiprisma version" prints, e.g. 1.0.0 for tag v1.0.0.
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files: [LICENSE, README.md]
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^Merge "
