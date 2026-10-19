@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>dpiprisma report</title>
+<style>
+:root {
+  --surface: #fcfcfb;
+  --surface-2: #f3f2ef;
+  --border: #dddcd7;
+  --text: #0b0b0b;
+  --text-2: #52514e;
+  --heat-0: #cde2fb; --heat-ink-0: #0b0b0b;
+  --heat-1: #9ec5f4; --heat-ink-1: #0b0b0b;
+  --heat-2: #6da7ec; --heat-ink-2: #0b0b0b;
+  --heat-3: #2a78d6; --heat-ink-3: #ffffff;
+  --heat-4: #184f95; --heat-ink-4: #ffffff;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #1a1a19;
+    --surface-2: #252523;
+    --border: #3a3a37;
+    --text: #f0efec;
+    --text-2: #c3c2b7;
+    --heat-0: #0d366b; --heat-ink-0: #f0efec;
+    --heat-1: #184f95; --heat-ink-1: #f0efec;
+    --heat-2: #256abf; --heat-ink-2: #f0efec;
+    --heat-3: #5598e7; --heat-ink-3: #0b0b0b;
+    --heat-4: #9ec5f4; --heat-ink-4: #0b0b0b;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--text);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+main { max-width: 64rem; margin: 0 auto; padding: 2rem 1rem 4rem; }
+h1 { font-size: 1.6rem; margin: 0 0 .25rem; }
+h2 { font-size: 1.2rem; margin: 2.5rem 0 .75rem; }
+h3 { font-size: 1rem; margin: 1.5rem 0 .25rem; }
+p { margin: .25rem 0 .75rem; }
+.muted { color: var(--text-2); }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; }
+th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { color: var(--text-2); font-weight: 600; font-size: .85rem; }
+code { font: .85rem/1.4 ui-monospace, "Cascadia Mono", Consolas, monospace; background: var(--surface-2); padding: .1rem .3rem; border-radius: 4px; white-space: nowrap; }
+table.heat { border-collapse: separate; border-spacing: 2px; width: auto; }
+table.heat th, table.heat td { border: 0; }
+table.heat th.col { white-space: nowrap; text-align: center; }
+table.heat td.cell { min-width: 4.5rem; text-align: center; font-variant-numeric: tabular-nums; font-weight: 600; border-radius: 4px; }
+td.none { color: var(--text-2); background: var(--surface-2); font-weight: 400; }
+td.s0 { background: var(--heat-0); color: var(--heat-ink-0); }
+td.s1 { background: var(--heat-1); color: var(--heat-ink-1); }
+td.s2 { background: var(--heat-2); color: var(--heat-ink-2); }
+td.s3 { background: var(--heat-3); color: var(--heat-ink-3); }
+td.s4 { background: var(--heat-4); color: var(--heat-ink-4); }
+.legend { display: flex; align-items: center; gap: .5rem; margin-top: .75rem; font-size: .85rem; color: var(--text-2); }
+.legend span.swatch { display: inline-block; width: 1.75rem; height: .75rem; border-radius: 2px; }
+</style>
+</head>
+<body>
+<main>
+<h1>dpiprisma report</h1>
+<p class="muted">Generated 2026-10-19 12:30 UTC by dpiprisma v1.0.0.</p>
+
+
+<h2>Diagnosis</h2>
+<div class="scroll"><table>
+<thead><tr><th>Domain</th><th>Verdict</th><th>Reason</th></tr></thead>
+<tbody>
+<tr><td>blocked.example</td><td>sni_blocking</td><td>the server answers other names but not this one</td></tr>
+<tr><td>poisoned.example</td><td>dns_poisoning</td><td>system DNS returned a bogus address</td></tr>
+<tr><td>example.com</td><td>accessible</td><td>TLS handshake succeeded</td></tr>
+</tbody>
+</table></div>
+
+
+
+<h2>DPI location</h2>
+<div class="scroll"><table>
+<thead><tr><th>Domain</th><th>Reset</th><th>DPI</th><th>Server</th><th>Fake TTL</th></tr></thead>
+<tbody>
+<tr><td>blocked.example</td><td>yes</td><td>3 hops (3 of 3 runs)</td><td>6-7 hops</td><td>3-5</td></tr>
+<tr><td>located.example</td><td>yes</td><td>4 hops (2 of 3 runs)</td><td>9 hops</td><td>4-8</td></tr>
+</tbody>
+</table></div>
+
+
+
+<h2>Strategy matrix</h2>
+<p class="muted">Share of connections that got a ServerHello. Hover a cell for attempts and latency.</p>
+<div class="scroll"><table class="heat">
+<thead><tr><th>Domain</th><th class="col">baseline</th><th class="col">fakech ttl=4</th><th class="col">fakerst ttl=4</th><th class="col">split at=2</th><th class="col">split at=10</th></tr></thead>
+<tbody>
+<tr><td>blocked.example</td><td class="cell s0" title="baseline: 0 of 10 succeeded">0%</td><td class="cell s4" title="fakech ttl=4: 10 of 10 succeeded, median 44.5 ms, p95 60.0 ms">100%</td><td class="cell s1" title="fakerst ttl=4: 2 of 10 succeeded, median 47.0 ms, p95 47.0 ms">20%</td><td class="cell s4" title="split at=2: 9 of 10 succeeded, median 48.0 ms, p95 70.0 ms">90%</td><td class="cell s3" title="split at=10: 6 of 10 succeeded, median 51.0 ms, p95 90.0 ms">60%</td></tr>
+<tr><td>example.com</td><td class="cell s4" title="baseline: 10 of 10 succeeded, median 30.0 ms, p95 35.0 ms">100%</td><td class="cell none" title="fakech ttl=4: not measured">-</td><td class="cell none" title="fakerst ttl=4: not measured">-</td><td class="cell none" title="split at=2: not measured">-</td><td class="cell none" title="split at=10: not measured">-</td></tr>
+</tbody>
+</table></div>
+<div class="legend">0%
+<span class="swatch" style="background: var(--heat-0)"></span><span class="swatch" style="background: var(--heat-1)"></span><span class="swatch" style="background: var(--heat-2)"></span><span class="swatch" style="background: var(--heat-3)"></span><span class="swatch" style="background: var(--heat-4)"></span>
+100%</div>
+
+
+
+<h2>Recommended commands</h2>
+<p class="muted">These are starting points. gecit and zapret run on Linux (zapret&#39;s nfqws also needs a firewall rule that sends traffic to queue 200), GoodbyeDPI on Windows, byedpi anywhere as a local SOCKS proxy.</p>
+
+<h3>blocked.example</h3>
+<p>Best: fakech ttl=4.</p>
+<div class="scroll"><table>
+<thead><tr><th>Tool</th><th>Command</th><th>Based on</th></tr></thead>
+<tbody>
+<tr><td>gecit</td><td><code>sudo gecit run --fake-ttl 4</code></td><td class="muted">fakech ttl=4: 10/10, median 44.5 ms</td></tr>
+<tr><td>zapret</td><td><code>nfqws --qnum=200 --dpi-desync=fake --dpi-desync-ttl=4</code></td><td class="muted">fakech ttl=4: 10/10, median 44.5 ms</td></tr>
+<tr><td>GoodbyeDPI</td><td><code>goodbyedpi.exe --set-ttl 4</code></td><td class="muted">fakech ttl=4: 10/10, median 44.5 ms</td></tr>
+<tr><td>byedpi</td><td><code>ciadpi --fake -1 --ttl 4</code></td><td class="muted">fakech ttl=4: 10/10, median 44.5 ms</td></tr>
+</tbody>
+</table></div>
+
+<h3>poisoned.example</h3>
+<p>DNS poisoning: use an encrypted resolver (DoH or DoT); gecit has one built in.</p>
+
+
+<h3>example.com</h3>
+<p>Not blocked: a plain ClientHello succeeded 10 of 10 times.</p>
+
+
+<h3>located.example</h3>
+<p>Not tested by the matrix; run &#34;dpiprisma matrix&#34; to confirm.</p>
+<div class="scroll"><table>
+<thead><tr><th>Tool</th><th>Command</th><th>Based on</th></tr></thead>
+<tbody>
+<tr><td>gecit</td><td><code>sudo gecit run --fake-ttl 4</code></td><td class="muted">fake-ttl 4-8 from locate; not tested</td></tr>
+<tr><td>zapret</td><td><code>nfqws --qnum=200 --dpi-desync=fake --dpi-desync-ttl=4</code></td><td class="muted">fake-ttl 4-8 from locate; not tested</td></tr>
+<tr><td>GoodbyeDPI</td><td><code>goodbyedpi.exe --set-ttl 4</code></td><td class="muted">fake-ttl 4-8 from locate; not tested</td></tr>
+<tr><td>byedpi</td><td><code>ciadpi --fake -1 --ttl 4</code></td><td class="muted">fake-ttl 4-8 from locate; not tested</td></tr>
+</tbody>
+</table></div>
+
+
+</main>
+</body>
+</html>
