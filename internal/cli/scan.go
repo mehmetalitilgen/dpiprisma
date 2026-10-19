@@ -17,17 +17,31 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+// certVerifier is the part of probe.CertVerifier that scanDomain uses; tests
+// replace it so that no real handshake is needed.
+type certVerifier interface {
+	Verify(ctx context.Context, addr netip.AddrPort, serverName string, timeout time.Duration) probe.CertResult
+}
+
+// scanner holds what scanDomain needs besides the domain itself.
+type scanner struct {
+	system  probe.Resolver // the operating system's resolver, which the ISP usually controls
+	trusted probe.Resolver // a resolver the ISP cannot tamper with (DoH)
+	verify  certVerifier   // checks the certificate of the address the system DNS gave
+	port    uint16         // 443 outside of tests
+	timeout time.Duration  // time limit for each network step
+}
+
 // scanDomain runs the DNS, TCP and TLS probes for domain and classifies the
 // result. TCP and TLS go to the first address from the trusted resolver, since
-// the system answer may be poisoned. port is 443 outside of tests.
-func scanDomain(ctx context.Context, domain string, system, trusted probe.Resolver, port uint16, timeout time.Duration) model.ProbeResult {
+// the system answer may be poisoned.
+func (s scanner) scanDomain(ctx context.Context, domain string) model.ProbeResult {
 	probeResult := model.ProbeResult{
 		Domain:    domain,
 		CheckedAt: time.Now().UTC(),
 	}
 
-	dnsCmp, err := probe.CompareDNS(ctx, system, trusted, domain)
-
+	dnsCmp, err := probe.CompareDNS(ctx, s.system, s.trusted, domain)
 	if err != nil {
 		probeResult.Reason = fmt.Sprintf("DNS lookup failed: %v", err)
 		return probeResult
@@ -40,23 +54,30 @@ func scanDomain(ctx context.Context, domain string, system, trusted probe.Resolv
 
 	slog.Debug("dns", "domain", domain, "system", dnsCmp.System, "trusted", dnsCmp.Trusted)
 
-	firstIP := dnsCmp.Trusted[0]
-
-	addr := netip.AddrPortFrom(firstIP, port)
-
-	tcp := probe.ProbeTCP(ctx, addr, timeout)
-	slog.Debug("tcp", "domain", domain, "addr", addr, "outcome", tcp.Outcome, "elapsed", tcp.Elapsed)
-
 	evidence := model.Evidence{
-		DNSBogus:     dnsCmp.Bogus,
-		DNSNXDomain:  len(dnsCmp.System) == 0, // system DNS gave nothing, DoH did (checked above)
-		DNSMismatch:  dnsCmp.Mismatch,
-		TCPConnected: tcp.Outcome == probe.TCPConnected,
-		TCPTimeout:   tcp.Outcome == probe.TCPTimeout,
+		DNSBogus:    dnsCmp.Bogus,
+		DNSNXDomain: dnsCmp.NXDomain,
+		DNSMismatch: dnsCmp.Mismatch,
 	}
 
+	// A system answer that differs from DoH is either a CDN node or an ISP
+	// block page. Only the real site can present a certificate for the domain.
+	if dnsCmp.Mismatch && !dnsCmp.Bogus && len(dnsCmp.System) > 0 {
+		systemAddr := netip.AddrPortFrom(dnsCmp.System[0], s.port)
+		cert := s.verify.Verify(ctx, systemAddr, domain, s.timeout)
+		slog.Debug("cert", "domain", domain, "addr", systemAddr, "outcome", cert.Outcome, "err", cert.Err)
+		evidence.DNSRedirectBadCert = cert.Outcome == probe.CertInvalid
+	}
+
+	addr := netip.AddrPortFrom(dnsCmp.Trusted[0], s.port)
+
+	tcp := probe.ProbeTCP(ctx, addr, s.timeout)
+	slog.Debug("tcp", "domain", domain, "addr", addr, "outcome", tcp.Outcome, "elapsed", tcp.Elapsed)
+	evidence.TCPConnected = tcp.Outcome == probe.TCPConnected
+	evidence.TCPTimeout = tcp.Outcome == probe.TCPTimeout
+
 	if tcp.Outcome == probe.TCPConnected {
-		cmpSNI := probe.CompareSNI(ctx, addr, domain, timeout)
+		cmpSNI := probe.CompareSNI(ctx, addr, domain, s.timeout)
 		slog.Debug("tls", "domain", domain, "control", cmpSNI.Control.Outcome, "target", cmpSNI.Target.Outcome)
 		evidence.TLSControlAnswered = cmpSNI.Control.Outcome.Answered()
 		evidence.TLSTargetAnswered = cmpSNI.Target.Outcome.Answered()
@@ -94,10 +115,24 @@ func newScanCmd() *cobra.Command {
 		Short: "Probe domains and report how each one is blocked",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			system := &probe.SystemResolver{}
-			trusted := &probe.DoHResolver{
-				URL:    dohURL,
-				Client: &http.Client{Timeout: timeout},
+			// errgroup treats a limit of 0 as "never start a goroutine", which
+			// would deadlock below, so reject it up front.
+			if parallel < 1 {
+				return fmt.Errorf("--parallel must be at least 1, got %d", parallel)
+			}
+			if timeout <= 0 {
+				return fmt.Errorf("--timeout must be positive, got %v", timeout)
+			}
+
+			s := scanner{
+				system: &probe.SystemResolver{},
+				trusted: &probe.DoHResolver{
+					URL:    dohURL,
+					Client: &http.Client{Timeout: timeout},
+				},
+				verify:  probe.CertVerifier{},
+				port:    443,
+				timeout: timeout,
 			}
 
 			results := make([]model.ProbeResult, len(args))
@@ -106,7 +141,7 @@ func newScanCmd() *cobra.Command {
 			for i, domain := range args {
 				g.Go(func() error {
 					// Each goroutine writes only its own cell, so no lock is needed.
-					results[i] = scanDomain(cmd.Context(), domain, system, trusted, 443, timeout)
+					results[i] = s.scanDomain(cmd.Context(), domain)
 					return nil
 				})
 			}

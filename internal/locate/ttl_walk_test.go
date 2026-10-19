@@ -384,6 +384,13 @@ func TestFindDPI(t *testing.T) {
 			want:      "timeout closed unknown reset",
 			wantCalls: 4,
 		},
+		{
+			name:      "unknown with an error stops",
+			results:   map[int]probe.TLSResult{2: {Outcome: probe.TLSUnknown, Err: boom}},
+			want:      "timeout unknown",
+			wantErr:   boom,
+			wantCalls: 2,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

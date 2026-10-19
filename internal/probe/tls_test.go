@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"runtime"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -198,6 +199,33 @@ func TestProbeTLSConnect(t *testing.T) {
 	failed := ProbeTLS(context.Background(), netip.MustParseAddrPort("127.0.0.1:1"), "example.com", time.Second)
 	if failed.Outcome != TLSDialFailed || failed.Connect != 0 {
 		t.Errorf("dial failed: %v, Connect %v; want dial_failed, Connect 0", failed.Outcome, failed.Connect)
+	}
+}
+
+// TestProbeTLSLocal checks that Local names the connection's own port, so
+// captured packets can be matched to it, and stays zero when no connection
+// was made.
+func TestProbeTLSLocal(t *testing.T) {
+	var seen atomic.Value // the remote address the server saw, as a string
+	addr := tcpServer(t, func(c *net.TCPConn, _ []byte) {
+		seen.Store(c.RemoteAddr().String())
+		c.Write([]byte{0x16, 0x03, 0x03, 0x00, 0x7a, 0x02})
+	})
+
+	got := ProbeTLS(context.Background(), addr, "example.com", 2*time.Second)
+	if got.Outcome != TLSServerHello {
+		t.Fatalf("ProbeTLS = %v (err %v); want server_hello", got.Outcome, got.Err)
+	}
+	if !got.Local.IsValid() || got.Local.Port() == 0 || got.Local.Addr() != addr.Addr() {
+		t.Errorf("Local = %v; want a port on %v", got.Local, addr.Addr())
+	}
+	if want, _ := seen.Load().(string); want != got.Local.String() {
+		t.Errorf("Local = %v; the server saw the client at %s", got.Local, want)
+	}
+
+	failed := ProbeTLS(context.Background(), netip.MustParseAddrPort("127.0.0.1:1"), "example.com", time.Second)
+	if failed.Local.IsValid() {
+		t.Errorf("Local after a failed dial = %v; want zero", failed.Local)
 	}
 }
 

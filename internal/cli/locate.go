@@ -85,6 +85,18 @@ func newLocateCmd() *cobra.Command {
 			domain := args[0]
 			ctx := cmd.Context()
 
+			// Check the flags before touching the network, so a bad value
+			// fails at once instead of after the first probe.
+			if runs < 1 {
+				return fmt.Errorf("--runs must be at least 1, got %d", runs)
+			}
+			if maxTTL < 1 || maxTTL > 255 {
+				return fmt.Errorf("--max-ttl must be between 1 and 255, got %d", maxTTL)
+			}
+			if timeout <= 0 {
+				return fmt.Errorf("--timeout must be positive, got %v", timeout)
+			}
+
 			trusted := probe.DoHResolver{
 				URL:    doh,
 				Client: &http.Client{Timeout: timeout},

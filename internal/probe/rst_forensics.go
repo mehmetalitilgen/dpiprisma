@@ -151,9 +151,11 @@ func AnalyzeRST(synAck, rst packet.Captured) (RSTAnalysis, error) {
 }
 
 // ObserveRST makes a TLS attempt to addr with sni while capturing the packets
-// the server sends, then runs AnalyzeRST on the SYN-ACK and the first RST. It
-// returns ErrNoSynAck if the connection never opened and ErrNoRST if it was
-// not reset. It reads a raw socket, so it needs root (or CAP_NET_RAW) on Linux.
+// the server sends, then runs AnalyzeRST on the SYN-ACK and the first RST of
+// that very connection; packets of other connections to the same server (a
+// browser tab, say) are ignored by their port. It returns ErrNoSynAck if the
+// connection never opened and ErrNoRST if it was not reset. It reads a raw
+// socket, so it needs root (or CAP_NET_RAW) on Linux.
 func ObserveRST(ctx context.Context, addr netip.AddrPort, sni string, timeout time.Duration) (RSTAnalysis, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -172,7 +174,7 @@ func ObserveRST(ctx context.Context, addr netip.AddrPort, sni string, timeout ti
 
 	sleepCtx(gctx, 100*time.Millisecond)
 
-	ProbeTLS(gctx, addr, sni, timeout)
+	attempt := ProbeTLS(gctx, addr, sni, timeout)
 
 	sleepCtx(gctx, 100*time.Millisecond)
 	cancel()
@@ -181,11 +183,16 @@ func ObserveRST(ctx context.Context, addr netip.AddrPort, sni string, timeout ti
 	}
 	close(paketler)
 
+	// Only packets of our own connection count: from the server's port to
+	// the local port the dial used. A failed dial leaves Local zero, so
+	// nothing matches and ErrNoSynAck follows.
+	localPort := attempt.Local.Port()
+
 	var synAck, rst packet.Captured
 	var gotSynAck, gotRST bool
 
 	for c := range paketler {
-		if c.TCP.SrcPort != addr.Port() {
+		if c.TCP.SrcPort != addr.Port() || c.TCP.DstPort != localPort {
 			continue
 		}
 		if !gotSynAck {
@@ -195,9 +202,7 @@ func ObserveRST(ctx context.Context, addr netip.AddrPort, sni string, timeout ti
 			}
 			continue
 		}
-		if !gotRST &&
-			c.TCP.DstPort == synAck.TCP.DstPort &&
-			c.TCP.Flags&packet.FlagRST != 0 {
+		if !gotRST && c.TCP.Flags&packet.FlagRST != 0 {
 			rst = c
 			gotRST = true
 		}

@@ -89,3 +89,26 @@ func TestLocateCmd(t *testing.T) {
 		t.Error("locate with two domains: want an error")
 	}
 }
+
+// TestLocateFlagValidation checks that bad flag values fail before any
+// network step; none of these cases may need the internet.
+func TestLocateFlagValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string // text the error must contain
+	}{
+		{"zero runs", []string{"locate", "--runs", "0", "a.example"}, "--runs"},
+		{"zero max-ttl", []string{"locate", "--max-ttl", "0", "a.example"}, "--max-ttl"},
+		{"max-ttl above 255", []string{"locate", "--max-ttl", "256", "a.example"}, "--max-ttl"},
+		{"zero timeout", []string{"locate", "--timeout", "0", "a.example"}, "--timeout"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := run(t, tt.args...)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error = %v; want one mentioning %s", err, tt.want)
+			}
+		})
+	}
+}

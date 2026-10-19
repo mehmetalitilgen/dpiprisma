@@ -61,6 +61,7 @@ type Evidence struct {
 	DNSBogus           bool // the system DNS returned a private, loopback or unspecified address
 	DNSNXDomain        bool // the system DNS said the domain does not exist, but DoH resolved it
 	DNSMismatch        bool // the system and DoH answers share no address
+	DNSRedirectBadCert bool // the host the system DNS points to holds no certificate for the domain
 	TCPConnected       bool // a TCP connection to the real address succeeded
 	TCPTimeout         bool // the TCP connection to the real address timed out
 	TLSControlAnswered bool // the server answered the control SNI
@@ -76,6 +77,10 @@ func Classify(e Evidence) (Verdict, string) {
 
 	if e.DNSNXDomain {
 		return VerdictDNSPoisoning, "system DNS says the domain does not exist"
+	}
+
+	if e.DNSMismatch && e.DNSRedirectBadCert {
+		return VerdictDNSPoisoning, "system DNS points to a host without a certificate for this domain"
 	}
 
 	if !e.TCPConnected && e.TCPTimeout {

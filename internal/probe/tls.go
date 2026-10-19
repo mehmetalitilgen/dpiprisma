@@ -46,10 +46,11 @@ func (t TLSOutcome) Answered() bool {
 
 // TLSResult is the outcome of one TLS probe.
 type TLSResult struct {
-	Outcome TLSOutcome    // what came back
-	Elapsed time.Duration // time from sending the ClientHello to the answer or error
-	Connect time.Duration // time the TCP handshake took; about one round trip to the server
-	Err     error         // the error, if any
+	Outcome TLSOutcome     // what came back
+	Elapsed time.Duration  // time from sending the ClientHello to the answer or error
+	Connect time.Duration  // time the TCP handshake took; about one round trip to the server
+	Local   netip.AddrPort // local address of the connection, to match captured packets; zero if the dial failed
+	Err     error          // the error, if any
 }
 
 // EarlyReset reports whether the connection was reset in less than half the
@@ -119,12 +120,18 @@ func ProbeTLSTTL(ctx context.Context, addr netip.AddrPort, sni string, timeout t
 	if err != nil {
 		return TLSResult{Outcome: TLSDialFailed, Err: err}
 	}
-	connect := time.Since(dialStart)
 	defer conn.Close()
+
+	// Every later return carries the handshake time and the local address.
+	res := TLSResult{Connect: time.Since(dialStart)}
+	if tcpAddr, ok := conn.LocalAddr().(*net.TCPAddr); ok {
+		res.Local = tcpAddr.AddrPort()
+	}
 
 	if ttl > 0 {
 		if err := ipv4.NewConn(conn).SetTTL(int(ttl)); err != nil {
-			return TLSResult{Outcome: TLSUnknown, Connect: connect, Err: fmt.Errorf("probe: set TTL: %w", err)}
+			res.Outcome, res.Err = TLSUnknown, fmt.Errorf("probe: set TTL: %w", err)
+			return res
 		}
 	}
 
@@ -134,23 +141,26 @@ func ProbeTLSTTL(ctx context.Context, addr netip.AddrPort, sni string, timeout t
 
 	start := time.Now()
 	if _, err := conn.Write(clientHello); err != nil {
-		return TLSResult{Outcome: classifyReadError(err), Connect: connect, Elapsed: time.Since(start), Err: err}
+		res.Outcome, res.Elapsed, res.Err = classifyReadError(err), time.Since(start), err
+		return res
 	}
 
 	buf := make([]byte, 6) // record header (5) + handshake type (1)
 	if _, err := io.ReadFull(conn, buf); err != nil {
-		return TLSResult{Outcome: classifyReadError(err), Connect: connect, Elapsed: time.Since(start), Err: err}
+		res.Outcome, res.Elapsed, res.Err = classifyReadError(err), time.Since(start), err
+		return res
 	}
-	elapsed := time.Since(start)
+	res.Elapsed = time.Since(start)
 
 	switch {
 	case buf[0] == 0x16 && buf[5] == 0x02:
-		return TLSResult{Outcome: TLSServerHello, Connect: connect, Elapsed: elapsed}
+		res.Outcome = TLSServerHello
 	case buf[0] == 0x15:
-		return TLSResult{Outcome: TLSAlert, Connect: connect, Elapsed: elapsed}
+		res.Outcome = TLSAlert
 	default:
-		return TLSResult{Outcome: TLSUnknown, Connect: connect, Elapsed: elapsed}
+		res.Outcome = TLSUnknown
 	}
+	return res
 }
 
 // controlSNI is the harmless name sent as the control in CompareSNI.

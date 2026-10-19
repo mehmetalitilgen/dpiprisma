@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -65,10 +66,23 @@ func fakeTLSServer(t *testing.T, blockedSNI string) uint16 {
 	return netip.MustParseAddrPort(ln.Addr().String()).Port()
 }
 
+// fakeVerifier answers every certificate check with outcome and records the
+// addresses it was asked about.
+type fakeVerifier struct {
+	outcome probe.CertOutcome
+	asked   []netip.AddrPort
+}
+
+func (f *fakeVerifier) Verify(ctx context.Context, addr netip.AddrPort, serverName string, timeout time.Duration) probe.CertResult {
+	f.asked = append(f.asked, addr)
+	return probe.CertResult{Outcome: f.outcome}
+}
+
 func TestScanDomain(t *testing.T) {
 	port := fakeTLSServer(t, "blocked.example")
 	local := staticResolver{addrs: []string{"127.0.0.1"}} // DoH: the real address is our fake server
 	public := staticResolver{addrs: []string{"93.184.215.14"}}
+	publicAddr := netip.AddrPortFrom(netip.MustParseAddr("93.184.215.14"), port)
 
 	closedLn, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -82,33 +96,64 @@ func TestScanDomain(t *testing.T) {
 		domain      string
 		system      probe.Resolver
 		trusted     probe.Resolver
+		cert        probe.CertOutcome // what the system address's certificate check finds
 		port        uint16
 		wantVerdict model.Verdict
 		wantReason  string
+		wantAsked   []netip.AddrPort // addresses the certificate check must have been run on
 	}{
-		{"accessible", "open.example", public, local, port,
-			model.VerdictAccessible, "TLS handshake succeeded; DNS answers differ (CDN?)"},
-		{"SNI blocking", "blocked.example", public, local, port,
-			model.VerdictSNIBlocking, "the server answers other names but not this one"},
-		{"bogus system DNS", "open.example", staticResolver{addrs: []string{"127.0.0.1"}}, local, port,
-			model.VerdictDNSPoisoning, "system DNS returned a bogus address"},
-		{"system NXDOMAIN", "open.example", staticResolver{err: probe.ErrNXDomain}, local, port,
-			model.VerdictDNSPoisoning, "system DNS says the domain does not exist"},
-		{"TCP refused", "open.example", public, local, closedPort,
-			model.VerdictUnknown, "TCP connection to the real address failed"},
-		{"DoH failure", "open.example", public, staticResolver{err: errors.New("doh down")}, port,
-			model.VerdictUnknown, "DNS lookup failed: doh down"},
-		{"DoH empty", "open.example", public, staticResolver{}, port,
-			model.VerdictUnknown, "DoH returned no address"},
+		{"accessible", "open.example", public, local, probe.CertValid, port,
+			model.VerdictAccessible, "TLS handshake succeeded; DNS answers differ (CDN?)", []netip.AddrPort{publicAddr}},
+		{"redirect to a block page", "open.example", public, local, probe.CertInvalid, port,
+			model.VerdictDNSPoisoning, "system DNS points to a host without a certificate for this domain", []netip.AddrPort{publicAddr}},
+		{"redirect that cannot be checked", "open.example", public, local, probe.CertUnknown, port,
+			model.VerdictAccessible, "TLS handshake succeeded; DNS answers differ (CDN?)", []netip.AddrPort{publicAddr}},
+		{"SNI blocking", "blocked.example", public, local, probe.CertValid, port,
+			model.VerdictSNIBlocking, "the server answers other names but not this one", []netip.AddrPort{publicAddr}},
+		{"bogus system DNS", "open.example", staticResolver{addrs: []string{"127.0.0.1"}}, local, probe.CertInvalid, port,
+			model.VerdictDNSPoisoning, "system DNS returned a bogus address", nil},
+		{"system NXDOMAIN", "open.example", staticResolver{err: probe.ErrNXDomain}, local, probe.CertInvalid, port,
+			model.VerdictDNSPoisoning, "system DNS says the domain does not exist", nil},
+		{"TCP refused", "open.example", public, local, probe.CertValid, closedPort,
+			model.VerdictUnknown, "TCP connection to the real address failed", []netip.AddrPort{netip.AddrPortFrom(netip.MustParseAddr("93.184.215.14"), closedPort)}},
+		{"DoH failure", "open.example", public, staticResolver{err: errors.New("doh down")}, probe.CertValid, port,
+			model.VerdictUnknown, "DNS lookup failed: doh down", nil},
+		{"DoH empty", "open.example", public, staticResolver{}, probe.CertValid, port,
+			model.VerdictUnknown, "DoH returned no address", nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := scanDomain(context.Background(), tt.domain, tt.system, tt.trusted, tt.port, 2*time.Second)
+			verify := &fakeVerifier{outcome: tt.cert}
+			s := scanner{system: tt.system, trusted: tt.trusted, verify: verify, port: tt.port, timeout: 2 * time.Second}
+			got := s.scanDomain(context.Background(), tt.domain)
 			if got.Domain != tt.domain || got.Verdict != tt.wantVerdict || got.Reason != tt.wantReason {
 				t.Errorf("scanDomain = %+v; want verdict %v, reason %q", got, tt.wantVerdict, tt.wantReason)
 			}
 			if got.CheckedAt.IsZero() {
 				t.Error("CheckedAt is not set")
+			}
+			if !slices.Equal(verify.asked, tt.wantAsked) {
+				t.Errorf("certificate check ran on %v; want %v", verify.asked, tt.wantAsked)
+			}
+		})
+	}
+}
+
+func TestScanFlagValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string // text the error must contain
+	}{
+		{"parallel 0 would deadlock", []string{"scan", "--parallel", "0", "a.example"}, "--parallel"},
+		{"negative parallel", []string{"scan", "--parallel", "-1", "a.example"}, "--parallel"},
+		{"zero timeout", []string{"scan", "--timeout", "0", "a.example"}, "--timeout"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := run(t, tt.args...)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error = %v; want one mentioning %s", err, tt.want)
 			}
 		})
 	}

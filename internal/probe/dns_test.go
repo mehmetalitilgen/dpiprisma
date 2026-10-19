@@ -137,16 +137,18 @@ func TestCompareDNS(t *testing.T) {
 		trusted      Resolver
 		wantMismatch bool
 		wantBogus    bool
+		wantNXDomain bool
 		wantErr      bool
 	}{
-		{"same answer", fakeResolver{answers: map[string][]string{"x.com": {"2.2.2.2"}}}, trusted, false, false, false},
-		{"different public answer", fakeResolver{answers: map[string][]string{"x.com": {"9.9.9.9"}}}, trusted, true, false, false},
-		{"loopback answer", fakeResolver{answers: map[string][]string{"x.com": {"127.0.0.1"}}}, trusted, true, true, false},
-		{"private answer", fakeResolver{answers: map[string][]string{"x.com": {"10.0.0.1"}}}, trusted, true, true, false},
-		{"unspecified answer", fakeResolver{answers: map[string][]string{"x.com": {"0.0.0.0"}}}, trusted, true, true, false},
-		{"system says NXDOMAIN", fakeResolver{answers: map[string][]string{}}, trusted, true, false, false},
-		{"system fails", fakeResolver{err: broken}, trusted, false, false, true},
-		{"trusted fails", fakeResolver{answers: map[string][]string{"x.com": {"2.2.2.2"}}}, fakeResolver{err: broken}, false, false, true},
+		{"same answer", fakeResolver{answers: map[string][]string{"x.com": {"2.2.2.2"}}}, trusted, false, false, false, false},
+		{"different public answer", fakeResolver{answers: map[string][]string{"x.com": {"9.9.9.9"}}}, trusted, true, false, false, false},
+		{"loopback answer", fakeResolver{answers: map[string][]string{"x.com": {"127.0.0.1"}}}, trusted, true, true, false, false},
+		{"private answer", fakeResolver{answers: map[string][]string{"x.com": {"10.0.0.1"}}}, trusted, true, true, false, false},
+		{"unspecified answer", fakeResolver{answers: map[string][]string{"x.com": {"0.0.0.0"}}}, trusted, true, true, false, false},
+		{"system says NXDOMAIN", fakeResolver{answers: map[string][]string{}}, trusted, true, false, true, false},
+		{"system answers with no record", fakeResolver{answers: map[string][]string{"x.com": {}}}, trusted, true, false, false, false},
+		{"system fails", fakeResolver{err: broken}, trusted, false, false, false, true},
+		{"trusted fails", fakeResolver{answers: map[string][]string{"x.com": {"2.2.2.2"}}}, fakeResolver{err: broken}, false, false, false, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -157,8 +159,8 @@ func TestCompareDNS(t *testing.T) {
 			if err != nil {
 				return
 			}
-			if got.Mismatch != tt.wantMismatch || got.Bogus != tt.wantBogus {
-				t.Errorf("CompareDNS = %+v; want Mismatch=%v Bogus=%v", got, tt.wantMismatch, tt.wantBogus)
+			if got.Mismatch != tt.wantMismatch || got.Bogus != tt.wantBogus || got.NXDomain != tt.wantNXDomain {
+				t.Errorf("CompareDNS = %+v; want Mismatch=%v Bogus=%v NXDomain=%v", got, tt.wantMismatch, tt.wantBogus, tt.wantNXDomain)
 			}
 		})
 	}

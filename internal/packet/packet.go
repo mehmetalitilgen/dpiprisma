@@ -109,7 +109,10 @@ func ParseTCP(b []byte) (TCPHeader, error) {
 	}
 
 	headerLen := int(b[12]>>4) * 4
-	if headerLen < 20 || headerLen > len(b) {
+	if headerLen < 20 {
+		return h, ErrBadHeader // a data offset below 5 words is not a valid header
+	}
+	if headerLen > len(b) {
 		return h, ErrTruncated
 	}
 

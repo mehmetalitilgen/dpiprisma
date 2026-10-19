@@ -115,6 +115,7 @@ type DNSComparison struct {
 	Trusted  []netip.Addr // the trusted (DoH) resolver's answer
 	Mismatch bool         // the two answers share no address
 	Bogus    bool         // the system answered with a private, loopback or unspecified address
+	NXDomain bool         // the system said the domain does not exist, although the trusted resolver found it
 }
 
 // CompareDNS looks up host with both resolvers and reports whether the
@@ -130,8 +131,11 @@ func CompareDNS(ctx context.Context, system, trusted Resolver, host string) (DNS
 	dc.Trusted = trustedAddrs
 
 	systemAddrs, err := system.LookupA(ctx, host)
-	if err != nil && !errors.Is(err, ErrNXDomain) {
-		return dc, err
+	if err != nil {
+		if !errors.Is(err, ErrNXDomain) {
+			return dc, err
+		}
+		dc.NXDomain = true // a finding, not a failure: the trusted resolver found the name
 	}
 	dc.System = systemAddrs
 

@@ -104,16 +104,17 @@ func TestParseTCPErrors(t *testing.T) {
 	tests := []struct {
 		name string
 		in   []byte
+		want error
 	}{
-		{"empty", nil},
-		{"19 bytes", valid[:19]},
-		{"data offset below 20", withOffset(4)},
-		{"data offset beyond data", withOffset(6)},
+		{"empty", nil, ErrTruncated},
+		{"19 bytes", valid[:19], ErrTruncated},
+		{"data offset below 20", withOffset(4), ErrBadHeader},
+		{"data offset beyond data", withOffset(6), ErrTruncated},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := ParseTCP(tt.in); !errors.Is(err, ErrTruncated) {
-				t.Errorf("ParseTCP error = %v; want ErrTruncated", err)
+			if _, err := ParseTCP(tt.in); !errors.Is(err, tt.want) {
+				t.Errorf("ParseTCP error = %v; want %v", err, tt.want)
 			}
 		})
 	}

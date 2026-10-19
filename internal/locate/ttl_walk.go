@@ -262,6 +262,12 @@ func FindDPI(ctx context.Context, p HelloProber, opt FindOptions) (DPIResult, er
 			return res, nil
 		case probe.TLSDialFailed:
 			return res, fmt.Errorf("locate: connect to target: %w", r.Err)
+		case probe.TLSUnknown:
+			// An unknown outcome with an error (the TTL could not be set, say)
+			// would repeat at every TTL; stop instead of walking the whole path.
+			if r.Err != nil {
+				return res, fmt.Errorf("locate: probe at TTL %d: %w", ttl, r.Err)
+			}
 		}
 	}
 	return res, nil
