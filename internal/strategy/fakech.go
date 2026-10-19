@@ -42,7 +42,6 @@ func (fakech) Name() string {
 // the same sequence with a low TTL over a raw socket, then writes the real
 // payload normally. It needs a Linux TCP socket and root.
 func (f fakech) Apply(conn net.Conn, payload []byte) error {
-	// 1. Mevcut seq/ack numaralarını oku (Windows'ta ErrNoRepair ile burada biter)
 	seq, ack, err := packet.ConnSeq(conn)
 	if err != nil {
 		return fmt.Errorf("strategy: fakech read seq: %w", err)
@@ -58,10 +57,8 @@ func (f fakech) Apply(conn net.Conn, payload []byte) error {
 		return fmt.Errorf("strategy: fakech endpoints: %w", err)
 	}
 
-	// 4. Yem için TCP segmentini hazırla
 	segment := packet.MarshalData(local, remote, seq, ack, decoy)
 
-	// 5. Düşük TTL ile ham soketten gönder
 	ttl := f.ttl
 	if ttl < 1 || ttl > 255 {
 		ttl = defaultFakeTTL
@@ -70,12 +67,10 @@ func (f fakech) Apply(conn net.Conn, payload []byte) error {
 		return fmt.Errorf("strategy: fakech send decoy: %w", err)
 	}
 
-	// 6. Asıl ClientHello'yu normal bağlantıdan gönder
 	if _, err := conn.Write(payload); err != nil {
 		return fmt.Errorf("strategy: fakech write real: %w", err)
 	}
 
-	// 7.
 	return nil
 }
 
