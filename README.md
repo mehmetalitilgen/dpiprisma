@@ -34,6 +34,8 @@ work — in a readable report.
 Those tools are the medicine; dpiprisma is the diagnosis that tells you the
 right dose.
 
+![A dpiprisma HTML report: the diagnosis table, the distance to the DPI device, the strategy matrix as a heat map and the recommended commands](docs/report.png)
+
 ## Install
 
 Download the archive for your system from the
@@ -148,6 +150,11 @@ are starting points; each tool's own documentation covers its setup.
 | `--matrix` | – | JSON from `matrix --json` (repeatable) |
 | `-o` | stdout | File to write |
 | `--format` | from `-o` | `md` or `html`; without it, a `.html` output is HTML, anything else Markdown |
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to build, test and send a
+change, and [CHANGELOG.md](CHANGELOG.md) for what changed in each release.
 
 ## Releasing
 
