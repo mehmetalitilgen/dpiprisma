@@ -18,7 +18,7 @@ func TestStrategyResultSuccessRate(t *testing.T) {
 		{0, 0, 0}, // nothing attempted: no division by zero
 	}
 	for _, tt := range tests {
-		r := StrategyResult{Attempts: tt.attempts, Successes: tt.successes}
+		r := StrategyResult{Runs: tt.attempts, Successes: tt.successes}
 		if got := r.SuccessRate(); got != tt.want {
 			t.Errorf("%d/%d: SuccessRate() = %v; want %v", tt.successes, tt.attempts, got, tt.want)
 		}
@@ -46,7 +46,7 @@ func TestStrategyResultJSON(t *testing.T) {
 		Domain:    "blocked.example",
 		Strategy:  "fakech",
 		Params:    map[string]int{"ttl": 5},
-		Attempts:  10,
+		Runs:      10,
 		Successes: 9,
 		P50:       42 * time.Millisecond,
 		P95:       80 * time.Millisecond,
@@ -55,7 +55,7 @@ func TestStrategyResultJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"domain":"blocked.example","strategy":"fakech","params":{"ttl":5},"attempts":10,"successes":9,"p50_ns":42000000,"p95_ns":80000000}`
+	want := `{"domain":"blocked.example","strategy":"fakech","params":{"ttl":5},"runs":10,"successes":9,"p50_ns":42000000,"p95_ns":80000000}`
 	if string(data) != want {
 		t.Errorf("json = %s\nwant   %s", data, want)
 	}

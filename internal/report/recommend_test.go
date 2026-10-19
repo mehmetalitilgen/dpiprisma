@@ -51,10 +51,10 @@ func TestRecommendPicksPerTool(t *testing.T) {
 	// fakech is best overall, but only split is something every tool except
 	// gecit can do; disorder ties split on rate and loses on latency.
 	r := matrixOnly(
-		model.StrategyResult{Strategy: "baseline", Attempts: 10},
-		model.StrategyResult{Strategy: "split", Params: map[string]int{"at": 1}, Attempts: 10, Successes: 9, P50: 40 * time.Millisecond},
-		model.StrategyResult{Strategy: "disorder", Params: map[string]int{"at": 1, "ttl": 1}, Attempts: 10, Successes: 9, P50: 60 * time.Millisecond},
-		model.StrategyResult{Strategy: "fakerst", Params: map[string]int{"ttl": 3}, Attempts: 10, Successes: 10, P50: 50 * time.Millisecond},
+		model.StrategyResult{Strategy: "baseline", Runs: 10},
+		model.StrategyResult{Strategy: "split", Params: map[string]int{"at": 1}, Runs: 10, Successes: 9, P50: 40 * time.Millisecond},
+		model.StrategyResult{Strategy: "disorder", Params: map[string]int{"at": 1, "ttl": 1}, Runs: 10, Successes: 9, P50: 60 * time.Millisecond},
+		model.StrategyResult{Strategy: "fakerst", Params: map[string]int{"ttl": 3}, Runs: 10, Successes: 10, P50: 50 * time.Millisecond},
 	)
 	a := Recommend(r)[0]
 
@@ -77,8 +77,8 @@ func TestRecommendPicksPerTool(t *testing.T) {
 
 func TestRecommendNothingWorks(t *testing.T) {
 	a := Recommend(matrixOnly(
-		model.StrategyResult{Strategy: "baseline", Attempts: 10},
-		model.StrategyResult{Strategy: "split", Params: map[string]int{"at": 1}, Attempts: 10, Successes: 7},
+		model.StrategyResult{Strategy: "baseline", Runs: 10},
+		model.StrategyResult{Strategy: "split", Params: map[string]int{"at": 1}, Runs: 10, Successes: 7},
 	))[0]
 	if a.Note != "No strategy succeeded at least 80% of the time." || len(a.Commands) != 0 {
 		t.Errorf("advice = %+v", a)
@@ -88,7 +88,7 @@ func TestRecommendNothingWorks(t *testing.T) {
 func TestRecommendMissingParam(t *testing.T) {
 	// Without "ttl" no command can be written, even though fakech worked.
 	a := Recommend(matrixOnly(
-		model.StrategyResult{Strategy: "fakech", Attempts: 10, Successes: 10},
+		model.StrategyResult{Strategy: "fakech", Runs: 10, Successes: 10},
 	))[0]
 	if a.Note != "fakech works, but none of the tools offers it." || len(a.Commands) != 0 {
 		t.Errorf("advice = %+v", a)

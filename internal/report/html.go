@@ -85,7 +85,7 @@ func heatMap(g grid) *htmlMatrix {
 				hr.Cells = append(hr.Cells, htmlCell{Text: "-", Step: -1, Title: g.Columns[i] + ": not measured"})
 				continue
 			}
-			title := fmt.Sprintf("%s: %d of %d succeeded", g.Columns[i], r.Successes, r.Attempts)
+			title := fmt.Sprintf("%s: %d of %d succeeded", g.Columns[i], r.Successes, r.Runs)
 			if r.Successes > 0 {
 				title += fmt.Sprintf(", median %s, p95 %s", ms(r.P50), ms(r.P95))
 			}

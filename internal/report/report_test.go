@@ -32,12 +32,12 @@ func sample() Results {
 			{Domain: "located.example", Blocked: true, Runs: 3, DPIHops: 4, DPIVotes: 2, ServerMin: 9, ServerMax: 9, FakeTTLMin: 4, FakeTTLMax: 8},
 		},
 		Matrix: []model.StrategyResult{
-			{Domain: "blocked.example", Strategy: "split", Params: map[string]int{"at": 10}, Attempts: 10, Successes: 6, P50: 51 * time.Millisecond, P95: 90 * time.Millisecond},
-			{Domain: "blocked.example", Strategy: "split", Params: map[string]int{"at": 2}, Attempts: 10, Successes: 9, P50: 48 * time.Millisecond, P95: 70 * time.Millisecond},
-			{Domain: "blocked.example", Strategy: "baseline", Attempts: 10, Successes: 0},
-			{Domain: "blocked.example", Strategy: "fakech", Params: map[string]int{"ttl": 4}, Attempts: 10, Successes: 10, P50: 44500 * time.Microsecond, P95: 60 * time.Millisecond},
-			{Domain: "blocked.example", Strategy: "fakerst", Params: map[string]int{"ttl": 4}, Attempts: 10, Successes: 2, P50: 47 * time.Millisecond, P95: 47 * time.Millisecond},
-			{Domain: "example.com", Strategy: "baseline", Attempts: 10, Successes: 10, P50: 30 * time.Millisecond, P95: 35 * time.Millisecond},
+			{Domain: "blocked.example", Strategy: "split", Params: map[string]int{"at": 10}, Runs: 10, Successes: 6, P50: 51 * time.Millisecond, P95: 90 * time.Millisecond},
+			{Domain: "blocked.example", Strategy: "split", Params: map[string]int{"at": 2}, Runs: 10, Successes: 9, P50: 48 * time.Millisecond, P95: 70 * time.Millisecond},
+			{Domain: "blocked.example", Strategy: "baseline", Runs: 10, Successes: 0},
+			{Domain: "blocked.example", Strategy: "fakech", Params: map[string]int{"ttl": 4}, Runs: 10, Successes: 10, P50: 44500 * time.Microsecond, P95: 60 * time.Millisecond},
+			{Domain: "blocked.example", Strategy: "fakerst", Params: map[string]int{"ttl": 4}, Runs: 10, Successes: 2, P50: 47 * time.Millisecond, P95: 47 * time.Millisecond},
+			{Domain: "example.com", Strategy: "baseline", Runs: 10, Successes: 10, P50: 30 * time.Millisecond, P95: 35 * time.Millisecond},
 		},
 	}
 }

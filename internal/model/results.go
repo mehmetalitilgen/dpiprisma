@@ -22,24 +22,25 @@ type LocateResult struct {
 }
 
 // StrategyResult is how one strategy, with one set of parameters, did
-// against one domain over repeated attempts. The matrix runner writes a
-// list of these and the report reads them.
+// against one domain over repeated runs. "dpiprisma matrix --json" writes a
+// list of these and "dpiprisma report" reads them. Params carries what the
+// strategy's name does not, so the report can turn it into commands.
 type StrategyResult struct {
 	Domain    string         `json:"domain"`           // the domain the ClientHellos named
 	Strategy  string         `json:"strategy"`         // registry name, e.g. "split"
 	Params    map[string]int `json:"params,omitempty"` // e.g. {"at": 1} or {"ttl": 5}; nil for none
-	Attempts  int            `json:"attempts"`         // connections tried
+	Runs      int            `json:"runs"`             // connections tried
 	Successes int            `json:"successes"`        // connections that got a ServerHello
 	P50       time.Duration  `json:"p50_ns"`           // median time to the ServerHello, over successes
 	P95       time.Duration  `json:"p95_ns"`           // 95th percentile of the same
 }
 
-// SuccessRate returns Successes/Attempts, or 0 when nothing was attempted.
+// SuccessRate returns Successes/Runs, or 0 when nothing was attempted.
 func (r StrategyResult) SuccessRate() float64 {
-	if r.Attempts <= 0 {
+	if r.Runs <= 0 {
 		return 0
 	}
-	return float64(r.Successes) / float64(r.Attempts)
+	return float64(r.Successes) / float64(r.Runs)
 }
 
 // Label names the strategy with its parameters, sorted by key, e.g.

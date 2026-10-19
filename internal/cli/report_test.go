@@ -30,8 +30,8 @@ const (
 	locateJSON = `{"domain": "blocked.example", "blocked": true, "runs": 3, "dpi_hops": 3, "dpi_votes": 3,
   "server_min": 6, "server_max": 7, "fake_ttl_min": 3, "fake_ttl_max": 5}`
 	matrixJSON = `[
-  {"domain": "blocked.example", "strategy": "baseline", "attempts": 10, "successes": 0, "p50_ns": 0, "p95_ns": 0},
-  {"domain": "blocked.example", "strategy": "split", "params": {"at": 1}, "attempts": 10, "successes": 9, "p50_ns": 42000000, "p95_ns": 60000000}
+  {"domain": "blocked.example", "strategy": "baseline", "runs": 10, "successes": 0, "p50_ns": 0, "p95_ns": 0},
+  {"domain": "blocked.example", "strategy": "split", "params": {"at": 1}, "runs": 10, "successes": 9, "p50_ns": 42000000, "p95_ns": 60000000}
 ]`
 )
 

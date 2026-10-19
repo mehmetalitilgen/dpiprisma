@@ -121,7 +121,7 @@ func adviseDomain(domain string, verdict model.Verdict, loc model.LocateResult, 
 func adviseFromMatrix(a Advice, tested []model.StrategyResult) Advice {
 	for _, r := range tested {
 		if r.Strategy == "baseline" && r.SuccessRate() >= WorkingRate {
-			a.Note = fmt.Sprintf("Not blocked: a plain ClientHello succeeded %d of %d times.", r.Successes, r.Attempts)
+			a.Note = fmt.Sprintf("Not blocked: a plain ClientHello succeeded %d of %d times.", r.Successes, r.Runs)
 			return a
 		}
 	}
@@ -145,7 +145,7 @@ func adviseFromMatrix(a Advice, tested []model.StrategyResult) Advice {
 	for _, tool := range Tools {
 		for _, r := range working {
 			if line, ok := commandFor(tool, r); ok {
-				basis := fmt.Sprintf("%s: %d/%d, median %s", r.Label(), r.Successes, r.Attempts, ms(r.P50))
+				basis := fmt.Sprintf("%s: %d/%d, median %s", r.Label(), r.Successes, r.Runs, ms(r.P50))
 				a.Commands = append(a.Commands, Command{Tool: tool, Line: line, Basis: basis})
 				break
 			}
