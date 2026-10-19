@@ -29,10 +29,24 @@ uses [Semantic Versioning](https://semver.org/).
   macOS (amd64 and arm64) with GoReleaser and publishes them as a GitHub
   release with checksums.
 
+### Changed
+
+- `scan`: a system DNS answer that differs from DoH is now checked with a
+  full TLS handshake. A host without a valid certificate for the domain is
+  reported as `dns_poisoning` instead of "accessible (CDN?)", which is how
+  ISP block pages at public addresses used to slip through.
+- `scan` rejects `--parallel 0` and a non-positive `--timeout` before any
+  work starts; `--parallel 0` used to deadlock the process.
+- `locate` checks `--runs`, `--max-ttl` and `--timeout` before touching the
+  network and stops a TTL walk on the first probe error instead of repeating
+  it at every TTL.
+
 ### Fixed
 
-- `scan --parallel 0` no longer deadlocks; the flag now requires at least 1.
-- Probes use tighter timeouts and clearer error reasons.
+- Forged-reset detection pairs only the SYN-ACK and RST of its own
+  connection, so other traffic to the same server cannot be matched by
+  mistake.
+- TCP header parsing reports a data offset below 20 bytes as a bad header.
 
 ## [0.1.0] - 2026-10-07
 
@@ -40,9 +54,8 @@ uses [Semantic Versioning](https://semver.org/).
 
 - `dpiprisma scan`: tells DNS poisoning, IP-level blackholing and SNI-based
   blocking apart with controlled A/B tests. Compares the system DNS answer
-  with DNS over HTTPS, checks a differing answer with a full TLS handshake
-  and certificate validation, then sends two ClientHellos to the real address,
-  one with a control name and one with the domain.
+  with DNS over HTTPS, then sends two ClientHellos to the real address, one
+  with a control name and one with the domain.
 - Verdicts `accessible`, `dns_poisoning`, `ip_blackhole`, `sni_blocking` and
   `unknown`, each with a reason; table and `--json` output.
 - Hand-built TLS 1.3 ClientHello and a bounds-checked SNI parser with a fuzz

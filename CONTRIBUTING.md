@@ -24,9 +24,10 @@ go test -race ./...
 go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
 ```
 
-Tests that need the network are opt-in; see the `-integration` flags and
-`testing.Short()` checks in the test files. Tests that need raw sockets skip
-themselves unless they run as root on Linux.
+Tests that need the internet are opt-in: set `DPIPRISMA_INTEGRATION=1` to
+run them. Tests that need raw sockets skip themselves unless they run as root
+on Linux. The report tests compare against golden files; after an intended
+output change, regenerate them with `go test ./internal/report -update`.
 
 ## Where things live
 
@@ -47,9 +48,8 @@ themselves unless they run as root on Linux.
 
 - Keep a pull request to one change. Small, focused changes are reviewed
   faster.
-- Add or update tests next to the code you change. Golden files live in
-  `testdata/` directories; regenerate them only when the output change is
-  intended, and say so in the pull request.
+- Add or update tests next to the code you change. Regenerate golden files
+  only when the output change is intended, and say so in the pull request.
 - Code, comments, commit messages and documentation are in English.
 - Write commit messages as a short imperative sentence that says what the
   change does, for example `Add the disorder strategy`.
