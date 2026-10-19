@@ -238,3 +238,25 @@ func MarshalData(src, dst netip.AddrPort, seq, ack uint32, payload []byte) []byt
 
 	return buf
 }
+
+// MarshalRST returns a 20-byte TCP segment from src to dst with RST and ACK
+// set, the given sequence and acknowledgment numbers, a zero window and a
+// valid checksum.
+func MarshalRST(src, dst netip.AddrPort, seq, ack uint32) []byte {
+	buf := make([]byte, 20)
+
+	binary.BigEndian.PutUint16(buf[0:2], src.Port())
+	binary.BigEndian.PutUint16(buf[2:4], dst.Port())
+	binary.BigEndian.PutUint32(buf[4:8], seq)
+	binary.BigEndian.PutUint32(buf[8:12], ack)
+	buf[12] = 5 << 4 // header length: 5 words = 20 bytes
+	buf[13] = FlagRST | FlagACK
+	binary.BigEndian.PutUint16(buf[14:16], 0)
+
+	checkSum := TCPChecksum(src.Addr(), dst.Addr(), buf)
+
+	binary.BigEndian.PutUint16(buf[16:18], checkSum)
+
+	return buf
+
+}

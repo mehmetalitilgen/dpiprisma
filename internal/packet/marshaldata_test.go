@@ -35,3 +35,22 @@ func TestMarshalDataChecksumCoversPayload(t *testing.T) {
 		t.Error("checksum did not change when the payload changed")
 	}
 }
+
+func TestMarshalRST(t *testing.T) {
+	src := netip.MustParseAddrPort("192.0.2.1:50000")
+	dst := netip.MustParseAddrPort("198.51.100.7:443")
+
+	got := MarshalRST(src, dst, 1000, 2000)
+	const want = "c35001bb000003e8000007d050140000f2d00000"
+	if gotHex := hex.EncodeToString(got); gotHex != want {
+		t.Errorf("MarshalRST =\n  %s\nwant\n  %s", gotHex, want)
+	}
+
+	// Recompute: a valid segment folds its checksum to the stored value.
+	stored := [2]byte{got[16], got[17]}
+	got[16], got[17] = 0, 0
+	cs := TCPChecksum(src.Addr(), dst.Addr(), got)
+	if byte(cs>>8) != stored[0] || byte(cs) != stored[1] {
+		t.Errorf("MarshalRST checksum %#04x does not verify", cs)
+	}
+}
