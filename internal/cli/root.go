@@ -37,6 +37,7 @@ func newRootCmd(version string) *cobra.Command {
 	root.AddCommand(newScanCmd())
 	root.AddCommand(newLocateCmd())
 	root.AddCommand(newReportCmd(version))
+	root.AddCommand(newMatrixCmd())
 	return root
 }
 

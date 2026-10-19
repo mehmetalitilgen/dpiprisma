@@ -7,9 +7,9 @@ Give it a domain and dpiprisma tells you **how** it is blocked on your network,
 work — in a readable report.
 
 > **Status:** diagnosis (`dpiprisma scan`), locating the DPI device
-> (`dpiprisma locate`) and reports (`dpiprisma report`) work. Forged-reset
-> detection is implemented as a library and needs root; the strategy matrix
-> command is in progress.
+> (`dpiprisma locate`), the strategy matrix (`dpiprisma matrix`) and reports
+> (`dpiprisma report`) work. Forged-reset detection is implemented as a library
+> and needs root; the fake-packet strategies in the matrix need root on Linux.
 
 ## What it does
 
@@ -24,8 +24,9 @@ work — in a readable report.
 - **Detect forged resets** *(library, needs root)* — spots injected TCP RST
   packets by comparing their TTL and IP-ID with genuine packets from the
   server.
-- **Test strategies** — runs a matrix of evasion techniques (split, disorder,
-  fake ClientHello, …) and measures the success rate and latency of each.
+- **Test strategies** *(available)* — runs a matrix of evasion techniques
+  (split, disorder, fake ClientHello, forged reset) and measures the success
+  rate and latency of each; `matrix --json` feeds the report.
 - **Report** *(available)* — turns saved results into a Markdown or HTML
   report, with the strategy matrix as a heat map and ready-to-use commands for
   gecit, zapret, GoodbyeDPI and byedpi.
@@ -96,6 +97,31 @@ never the server. `locate` needs no special privileges.
 | `--doh` | Cloudflare | Trusted DNS-over-HTTPS endpoint |
 | `--json` | off | Print JSON for `dpiprisma report` instead of text |
 
+```console
+$ dpiprisma matrix blocked.example --runs 10 --fake-ttl 4,6,9
+strategy      runs  ok  rate  p50    p95
+baseline      10    0   0%    -      -
+split         10    9   90%   41ms   58ms
+disorder      10    10  100%  233ms  260ms
+fakech ttl=6  10    8   80%   44ms   61ms
+...
+```
+
+`matrix` opens many real connections to the target, so run it at home with the
+VPN off, not on a corporate network; `--rate` caps how fast it connects. Each
+strategy is a column the report turns into a ready-to-use command. The
+fake-packet strategies (`fakech`, `fakerst`) write raw sockets and need root on
+Linux; without it they simply score 0%.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--runs` | `10` | How many times to try each strategy (at least 1) |
+| `--rate` | `5` | Most connections to open per second |
+| `--timeout` | `5s` | Time limit for each connection |
+| `--fake-ttl` | `6` | TTLs to try for `fakech`/`fakerst` (1–255, repeatable) |
+| `--doh` | Cloudflare | Trusted DNS-over-HTTPS endpoint |
+| `--json` | off | Print JSON for `dpiprisma report` instead of a table |
+
 Forged-reset detection and the SYN-based path walk read and write raw
 sockets. They work on Linux with root (or `CAP_NET_RAW`) and do not run on
 Windows; no packet-capture driver is needed.
@@ -103,7 +129,8 @@ Windows; no packet-capture driver is needed.
 ```console
 $ dpiprisma scan --json blocked.example > scan.json
 $ dpiprisma locate --json blocked.example > locate.json
-$ dpiprisma report --scan scan.json --locate locate.json -o report.html
+$ dpiprisma matrix --json blocked.example > matrix.json
+$ dpiprisma report --scan scan.json --locate locate.json --matrix matrix.json -o report.html
 ```
 
 `report` reads the JSON that `scan`, `locate` and `matrix` write with
