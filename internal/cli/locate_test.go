@@ -76,7 +76,7 @@ func TestLocateCmd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, flag := range []string{"--runs", "--timeout", "--max-ttl", "--gap", "--control", "--doh"} {
+	for _, flag := range []string{"--runs", "--timeout", "--max-ttl", "--gap", "--control", "--doh", "--json"} {
 		if !strings.Contains(out, flag) {
 			t.Errorf("locate --help does not mention %s:\n%s", flag, out)
 		}

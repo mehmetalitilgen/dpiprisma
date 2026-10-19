@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/mehmetalitilgen/dpiprisma/internal/locate"
+	"github.com/mehmetalitilgen/dpiprisma/internal/model"
 	"github.com/mehmetalitilgen/dpiprisma/internal/probe"
 	"github.com/spf13/cobra"
 )
@@ -53,6 +55,29 @@ func printLocate(w io.Writer, domain string, addr netip.AddrPort, first probe.TL
 	}
 }
 
+// locateResult reduces what locate found for domain to the saved form that
+// "dpiprisma report" reads. rep is ignored when the first attempt was not
+// reset.
+func locateResult(domain string, first probe.TLSResult, rep locate.Report) model.LocateResult {
+	res := model.LocateResult{Domain: domain, Blocked: first.Outcome == probe.TLSReset}
+	if !res.Blocked {
+		return res
+	}
+
+	res.Runs = len(rep.DPITTLs)
+	res.DPIHops, res.DPIVotes = rep.DPI()
+	if res.DPIHops == 0 {
+		res.DPIVotes = 0 // the votes were for "no reset", which DPIHops 0 already says
+	}
+	if lo, hi, ok := rep.ServerRange(); ok {
+		res.ServerMin, res.ServerMax = lo, hi
+	}
+	if lo, hi, ok := rep.FakeTTLRange(); ok {
+		res.FakeTTLMin, res.FakeTTLMax = lo, hi
+	}
+	return res
+}
+
 // span writes lo..hi as "3" when both are equal, otherwise as "3-5".
 func span(lo, hi int) string {
 	if lo == hi {
@@ -75,6 +100,7 @@ func newLocateCmd() *cobra.Command {
 		gap     time.Duration
 		control string
 		doh     string
+		jsonOut bool // set by --json
 	)
 
 	cmd := &cobra.Command{
@@ -110,10 +136,19 @@ func newLocateCmd() *cobra.Command {
 			}
 			addr := netip.AddrPortFrom(ips[0], 443)
 
+			show := func(first probe.TLSResult, rep locate.Report) error {
+				if jsonOut {
+					enc := json.NewEncoder(cmd.OutOrStdout())
+					enc.SetIndent("", "  ")
+					return enc.Encode(locateResult(domain, first, rep))
+				}
+				printLocate(cmd.OutOrStdout(), domain, addr, first, rep)
+				return nil
+			}
+
 			first := probe.ProbeTLS(ctx, addr, domain, timeout)
 			if first.Outcome != probe.TLSReset {
-				printLocate(cmd.OutOrStdout(), domain, addr, first, locate.Report{})
-				return nil
+				return show(first, locate.Report{})
 			}
 
 			fmt.Fprintf(cmd.ErrOrStderr(), "probing %s %d times; this can take a minute or two\n", domain, runs)
@@ -125,8 +160,7 @@ func newLocateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			printLocate(cmd.OutOrStdout(), domain, addr, first, rep)
-			return nil
+			return show(first, rep)
 		},
 	}
 
@@ -136,5 +170,6 @@ func newLocateCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&gap, "gap", 100*time.Millisecond, "pause between probes")
 	cmd.Flags().StringVar(&control, "control", "example.com", "harmless name sent to measure the server's distance")
 	cmd.Flags().StringVar(&doh, "doh", "https://cloudflare-dns.com/dns-query", "trusted DNS-over-HTTPS server")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "write JSON for \"dpiprisma report\" instead of text")
 	return cmd
 }
